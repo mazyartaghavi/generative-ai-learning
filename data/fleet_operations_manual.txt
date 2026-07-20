@@ -1,0 +1,31 @@
+# Fleet Operations Manual
+
+This manual defines routine safety and maintenance procedures for the company vehicle fleet. Drivers and fleet coordinators must record faults promptly and follow the escalation rules described below.
+
+
+## Engine Warning Procedures
+
+When an engine warning light appears, the driver must park the vehicle safely and record the warning in the fleet management system.
+
+The vehicle must not begin another delivery route until a qualified technician has completed an inspection. Severe engine noise, smoke, overheating, or loss of power requires immediate escalation to the maintenance supervisor.
+
+
+## Tire Pressure Procedures
+
+Drivers must inspect tire condition before beginning each route. A low-pressure warning requires the driver to stop at a safe location and measure the affected tire.
+
+A vehicle with severely low pressure, visible tire damage, or repeated pressure loss must be removed from service until the tire has been inspected or replaced.
+
+
+## Route Completion Procedures
+
+After completing a delivery route, the driver must record the final mileage, fuel level, route completion time, and any operational problems.
+
+A vehicle with no reported warning, damage, or unusual behaviour may be marked as operating normally and returned to the available fleet.
+
+
+## Emergency Escalation
+
+A driver must contact the emergency coordinator when a vehicle accident, fire, serious mechanical failure, or medical emergency occurs.
+
+The driver should provide the vehicle identifier, location, known hazards, number of affected people, and a concise description of the incident. Personal safety takes priority over protecting the vehicle or completing the route.

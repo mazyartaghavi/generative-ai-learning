@@ -1,0 +1,55 @@
+name: fleet-guarded-rag
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: fleet-guarded-rag:lesson-56
+    container_name: fleet-guarded-rag-api
+
+    init: true
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      FLEET_API_TITLE: "Fleet Guarded-RAG API"
+      FLEET_API_VERSION: "1.0.0"
+      FLEET_API_HOST: "0.0.0.0"
+      FLEET_API_PORT: "8000"
+
+      FLEET_VECTOR_INDEX_PATH: "/app/data/fleet_vector_index.json"
+
+      FLEET_QDRANT_PATH: "/app/data/qdrant_local"
+      FLEET_QDRANT_COLLECTION: "fleet_manual_chunks"
+      FLEET_RETRIEVAL_TOP_K: "3"
+
+      FLEET_OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      FLEET_GENERATION_MODEL: "llama3.2:3b"
+      FLEET_EMBEDDING_MODEL: "embeddinggemma"
+      FLEET_OLLAMA_TIMEOUT_SECONDS: "120"
+
+    volumes:
+      - type: bind
+        source: ./data
+        target: /app/data
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+
+    stop_grace_period: 30s

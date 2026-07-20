@@ -1,0 +1,50 @@
+{
+  "section_count": 5,
+  "sections": [
+    {
+      "section_id": "section-001",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Document Overview",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "This manual defines routine safety and maintenance procedures for the company vehicle fleet. Drivers and fleet coordinators must record faults promptly and follow the escalation rules described below.",
+      "character_count": 200,
+      "word_count": 28
+    },
+    {
+      "section_id": "section-002",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Engine Warning Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "When an engine warning light appears, the driver must park the vehicle safely and record the warning in the fleet management system.\n\nThe vehicle must not begin another delivery route until a qualified technician has completed an inspection. Severe engine noise, smoke, overheating, or loss of power requires immediate escalation to the maintenance supervisor.",
+      "character_count": 360,
+      "word_count": 54
+    },
+    {
+      "section_id": "section-003",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Tire Pressure Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "Drivers must inspect tire condition before beginning each route. A low-pressure warning requires the driver to stop at a safe location and measure the affected tire.\n\nA vehicle with severely low pressure, visible tire damage, or repeated pressure loss must be removed from service until the tire has been inspected or replaced.",
+      "character_count": 327,
+      "word_count": 52
+    },
+    {
+      "section_id": "section-004",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Route Completion Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "After completing a delivery route, the driver must record the final mileage, fuel level, route completion time, and any operational problems.\n\nA vehicle with no reported warning, damage, or unusual behaviour may be marked as operating normally and returned to the available fleet.",
+      "character_count": 280,
+      "word_count": 43
+    },
+    {
+      "section_id": "section-005",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Emergency Escalation",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "A driver must contact the emergency coordinator when a vehicle accident, fire, serious mechanical failure, or medical emergency occurs.\n\nThe driver should provide the vehicle identifier, location, known hazards, number of affected people, and a concise description of the incident. Personal safety takes priority over protecting the vehicle or completing the route.",
+      "character_count": 365,
+      "word_count": 52
+    }
+  ]
+}

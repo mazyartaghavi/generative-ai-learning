@@ -1,0 +1,128 @@
+{
+  "source_section_count": 5,
+  "chunk_count": 9,
+  "chunking_configuration": {
+    "strategy": "overlapping_word_windows",
+    "maximum_words": 35,
+    "overlap_words": 8
+  },
+  "chunks": [
+    {
+      "chunk_id": "section-001-chunk-001",
+      "section_id": "section-001",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Document Overview",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "This manual defines routine safety and maintenance procedures for the company vehicle fleet. Drivers and fleet coordinators must record faults promptly and follow the escalation rules described below.",
+      "chunk_number": 1,
+      "start_word": 0,
+      "end_word_exclusive": 28,
+      "word_count": 28,
+      "character_count": 200
+    },
+    {
+      "chunk_id": "section-002-chunk-001",
+      "section_id": "section-002",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Engine Warning Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "When an engine warning light appears, the driver must park the vehicle safely and record the warning in the fleet management system. The vehicle must not begin another delivery route until a qualified technician has",
+      "chunk_number": 1,
+      "start_word": 0,
+      "end_word_exclusive": 35,
+      "word_count": 35,
+      "character_count": 215
+    },
+    {
+      "chunk_id": "section-002-chunk-002",
+      "section_id": "section-002",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Engine Warning Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "another delivery route until a qualified technician has completed an inspection. Severe engine noise, smoke, overheating, or loss of power requires immediate escalation to the maintenance supervisor.",
+      "chunk_number": 2,
+      "start_word": 27,
+      "end_word_exclusive": 54,
+      "word_count": 27,
+      "character_count": 199
+    },
+    {
+      "chunk_id": "section-003-chunk-001",
+      "section_id": "section-003",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Tire Pressure Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "Drivers must inspect tire condition before beginning each route. A low-pressure warning requires the driver to stop at a safe location and measure the affected tire. A vehicle with severely low pressure, visible tire damage,",
+      "chunk_number": 1,
+      "start_word": 0,
+      "end_word_exclusive": 35,
+      "word_count": 35,
+      "character_count": 224
+    },
+    {
+      "chunk_id": "section-003-chunk-002",
+      "section_id": "section-003",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Tire Pressure Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "vehicle with severely low pressure, visible tire damage, or repeated pressure loss must be removed from service until the tire has been inspected or replaced.",
+      "chunk_number": 2,
+      "start_word": 27,
+      "end_word_exclusive": 52,
+      "word_count": 25,
+      "character_count": 158
+    },
+    {
+      "chunk_id": "section-004-chunk-001",
+      "section_id": "section-004",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Route Completion Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "After completing a delivery route, the driver must record the final mileage, fuel level, route completion time, and any operational problems. A vehicle with no reported warning, damage, or unusual behaviour may be marked as",
+      "chunk_number": 1,
+      "start_word": 0,
+      "end_word_exclusive": 35,
+      "word_count": 35,
+      "character_count": 223
+    },
+    {
+      "chunk_id": "section-004-chunk-002",
+      "section_id": "section-004",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Route Completion Procedures",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "damage, or unusual behaviour may be marked as operating normally and returned to the available fleet.",
+      "chunk_number": 2,
+      "start_word": 27,
+      "end_word_exclusive": 43,
+      "word_count": 16,
+      "character_count": 101
+    },
+    {
+      "chunk_id": "section-005-chunk-001",
+      "section_id": "section-005",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Emergency Escalation",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "A driver must contact the emergency coordinator when a vehicle accident, fire, serious mechanical failure, or medical emergency occurs. The driver should provide the vehicle identifier, location, known hazards, number of affected people, and a",
+      "chunk_number": 1,
+      "start_word": 0,
+      "end_word_exclusive": 35,
+      "word_count": 35,
+      "character_count": 243
+    },
+    {
+      "chunk_id": "section-005-chunk-002",
+      "section_id": "section-005",
+      "document_title": "Fleet Operations Manual",
+      "section_title": "Emergency Escalation",
+      "source": "data\\fleet_operations_manual.txt",
+      "content": "known hazards, number of affected people, and a concise description of the incident. Personal safety takes priority over protecting the vehicle or completing the route.",
+      "chunk_number": 2,
+      "start_word": 27,
+      "end_word_exclusive": 52,
+      "word_count": 25,
+      "character_count": 168
+    }
+  ]
+}

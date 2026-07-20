@@ -1,0 +1,5371 @@
+LESSON 49 — INTEGRATION INTERFACE AUDIT
+=======================================
+
+ENVIRONMENT
+===========
+Python executable: C:\Users\mazya\Projects\generative-ai-learning\.venv\Scripts\python.exe
+Python version: 3.13.5
+Platform: Windows-11-10.0.26200-SP0
+Project root: C:\Users\mazya\Projects\generative-ai-learning
+
+
+KEY INTEGRATION INTERFACES
+==========================
+
+TARGET: lesson_28_guarded_rag.run_guarded_rag
+TYPE: function
+SIGNATURE: (question: 'str', vector_index: 'LoadedVectorIndex', *, retriever: 'RetrieverFunction | None' = None) -> 'GuardedRAGResult'
+
+SOURCE:
+def run_guarded_rag(
+    question: str,
+    vector_index: LoadedVectorIndex,
+    *,
+    retriever: RetrieverFunction | None = None,
+) -> GuardedRAGResult:
+    """Run retrieval, abstention, generation, and validation."""
+
+    cleaned_question = question.strip()
+
+    if not cleaned_question:
+        raise ValueError(
+            "The question cannot be empty."
+        )
+
+    active_retriever = (
+        retrieve_chunks
+        if retriever is None
+        else retriever
+    )
+
+    if not callable(active_retriever):
+        raise TypeError(
+            "The retriever must be callable."
+        )
+
+    (
+        retrieval_results,
+        _query_token_count,
+    ) = active_retriever(
+        question=cleaned_question,
+        vector_index=vector_index,
+    )
+
+    top_similarity = (
+        retrieval_results[0].score
+    )
+
+    if top_similarity < ABSTENTION_THRESHOLD:
+        return GuardedRAGResult(
+            question=cleaned_question,
+            decision="ABSTAIN",
+            answer_strategy="retrieval abstention",
+            top_similarity=top_similarity,
+            threshold=ABSTENTION_THRESHOLD,
+            retrieval_results=retrieval_results,
+            context_sources=[],
+            generated_answer=None,
+            answer=FALLBACK_ANSWER,
+            generation_called=False,
+            citation_repair_used=False,
+            extractive_fallback_used=False,
+            citation_checks=[],
+            citation_decisions=[],
+            extractive_candidate=None,
+            answer_passed_validation=True,
+            generation_input_tokens=None,
+            generation_output_tokens=None,
+        )
+
+    initial_context_sources = (
+        expand_results_with_neighbours(
+            results=retrieval_results,
+            all_chunks=vector_index.chunks,
+        )
+    )
+
+    top_section_id = (
+        retrieval_results[0].chunk.section_id
+    )
+
+    context_sources = complete_top_section_context(
+        initial_sources=initial_context_sources,
+        top_section_id=top_section_id,
+        all_chunks=vector_index.chunks,
+    )
+
+    context = build_context(
+        context_sources
+    )
+
+    user_message = build_user_message(
+        question=cleaned_question,
+        context=context,
+    )
+
+    (
+        raw_generated_answer,
+        generation_input_tokens,
+        generation_output_tokens,
+    ) = generate_grounded_answer(
+        user_message
+    )
+
+    generated_answer = normalize_citation_format(
+        raw_generated_answer
+    )
+
+    (
+        generated_checks,
+        generated_answer_passed,
+    ) = evaluate_answer(
+        answer=generated_answer,
+        sources=context_sources,
+    )
+
+    if generated_answer_passed:
+        return GuardedRAGResult(
+            question=cleaned_question,
+            decision="ANSWER",
+            answer_strategy="grounded generation",
+            top_similarity=top_similarity,
+            threshold=ABSTENTION_THRESHOLD,
+            retrieval_results=retrieval_results,
+            context_sources=context_sources,
+            generated_answer=generated_answer,
+            answer=generated_answer,
+            generation_called=True,
+            citation_repair_used=False,
+            extractive_fallback_used=False,
+            citation_checks=generated_checks,
+            citation_decisions=[],
+            extractive_candidate=None,
+            answer_passed_validation=True,
+            generation_input_tokens=(
+                generation_input_tokens
+            ),
+            generation_output_tokens=(
+                generation_output_tokens
+            ),
+        )
+
+    (
+        citation_repaired_answer,
+        citation_decisions,
+    ) = deterministically_repair_citations(
+        answer=generated_answer,
+        sources=context_sources,
+    )
+
+    citation_repaired_answer = (
+        normalize_citation_format(
+            citation_repaired_answer
+        )
+    )
+
+    (
+        citation_repaired_checks,
+        citation_repaired_passed,
+    ) = evaluate_answer(
+        answer=citation_repaired_answer,
+        sources=context_sources,
+    )
+
+    if citation_repaired_passed:
+        return GuardedRAGResult(
+            question=cleaned_question,
+            decision="ANSWER",
+            answer_strategy=(
+                "deterministic citation repair"
+            ),
+            top_similarity=top_similarity,
+            threshold=ABSTENTION_THRESHOLD,
+            retrieval_results=retrieval_results,
+            context_sources=context_sources,
+            generated_answer=generated_answer,
+            answer=citation_repaired_answer,
+            generation_called=True,
+            citation_repair_used=True,
+            extractive_fallback_used=False,
+            citation_checks=citation_repaired_checks,
+            citation_decisions=citation_decisions,
+            extractive_candidate=None,
+            answer_passed_validation=True,
+            generation_input_tokens=(
+                generation_input_tokens
+            ),
+            generation_output_tokens=(
+                generation_output_tokens
+            ),
+        )
+
+    extractive_candidate = (
+        select_extractive_candidate(
+            question=cleaned_question,
+            top_section_id=top_section_id,
+            context_sources=context_sources,
+            all_chunks=vector_index.chunks,
+        )
+    )
+
+    if extractive_candidate is not None:
+        extractive_answer = (
+            build_extractive_answer(
+                extractive_candidate
+            )
+        )
+
+        (
+            extractive_checks,
+            extractive_answer_passed,
+        ) = evaluate_answer(
+            answer=extractive_answer,
+            sources=context_sources,
+        )
+
+        if extractive_answer_passed:
+            return GuardedRAGResult(
+                question=cleaned_question,
+                decision="ANSWER",
+                answer_strategy="extractive fallback",
+                top_similarity=top_similarity,
+                threshold=ABSTENTION_THRESHOLD,
+                retrieval_results=retrieval_results,
+                context_sources=context_sources,
+                generated_answer=generated_answer,
+                answer=extractive_answer,
+                generation_called=True,
+                citation_repair_used=True,
+                extractive_fallback_used=True,
+                citation_checks=extractive_checks,
+                citation_decisions=citation_decisions,
+                extractive_candidate=(
+                    extractive_candidate
+                ),
+                answer_passed_validation=True,
+                generation_input_tokens=(
+                    generation_input_tokens
+                ),
+                generation_output_tokens=(
+                    generation_output_tokens
+                ),
+            )
+
+    return GuardedRAGResult(
+        question=cleaned_question,
+        decision="ABSTAIN_AFTER_VALIDATION",
+        answer_strategy="validation abstention",
+        top_similarity=top_similarity,
+        threshold=ABSTENTION_THRESHOLD,
+        retrieval_results=retrieval_results,
+        context_sources=context_sources,
+        generated_answer=generated_answer,
+        answer=FALLBACK_ANSWER,
+        generation_called=True,
+        citation_repair_used=True,
+        extractive_fallback_used=True,
+        citation_checks=citation_repaired_checks,
+        citation_decisions=citation_decisions,
+        extractive_candidate=extractive_candidate,
+        answer_passed_validation=False,
+        generation_input_tokens=(
+            generation_input_tokens
+        ),
+        generation_output_tokens=(
+            generation_output_tokens
+        ),
+    )
+
+
+CLASS: lesson_35_qdrant_retriever_component.QdrantRetriever
+CONSTRUCTOR SIGNATURE: (client: 'QdrantClient', *, collection_name: 'str' = 'fleet_manual_chunks', top_k: 'int' = 3, owns_client: 'bool' = False) -> 'None'
+
+PUBLIC CALLABLE MEMBERS:
+- close(self) -> 'None'
+- from_local_path(path: 'Path', *, collection_name: 'str' = 'fleet_manual_chunks', top_k: 'int' = 3) -> 'QdrantRetriever'
+- retrieve(self, question: 'str', vector_index: 'LoadedVectorIndex') -> 'tuple[list[SearchResult], int]'
+- validate_collection(self, *, expected_point_count: 'int | None' = None) -> 'int'
+
+SOURCE:
+class QdrantRetriever:
+    """
+    Retrieve indexed document chunks from Qdrant.
+
+    The component accepts an existing Qdrant client so it
+    can be used with local storage, a Docker server, or a
+    remote Qdrant deployment.
+    """
+
+    def __init__(
+        self,
+        client: QdrantClient,
+        *,
+        collection_name: str = COLLECTION_NAME,
+        top_k: int = DEFAULT_TOP_K,
+        owns_client: bool = False,
+    ) -> None:
+        """Initialize the reusable retriever component."""
+
+        cleaned_collection_name = (
+            collection_name.strip()
+        )
+
+        if not cleaned_collection_name:
+            raise ValueError(
+                "The Qdrant collection name cannot be empty."
+            )
+
+        if top_k <= 0:
+            raise ValueError(
+                "The retrieval top_k value must be "
+                "greater than zero."
+            )
+
+        self._client = client
+        self._collection_name = (
+            cleaned_collection_name
+        )
+        self._top_k = top_k
+        self._owns_client = owns_client
+        self._closed = False
+
+    @classmethod
+    def from_local_path(
+        cls,
+        path: Path,
+        *,
+        collection_name: str = COLLECTION_NAME,
+        top_k: int = DEFAULT_TOP_K,
+    ) -> QdrantRetriever:
+        """Create a retriever for persistent local storage."""
+
+        if not isinstance(path, Path):
+            raise TypeError(
+                "The local Qdrant path must be a "
+                "pathlib.Path object."
+            )
+
+        if not path.exists():
+            raise FileNotFoundError(
+                "The local Qdrant storage directory "
+                f"does not exist: {path}"
+            )
+
+        client = QdrantClient(
+            path=str(path)
+        )
+
+        return cls(
+            client=client,
+            collection_name=collection_name,
+            top_k=top_k,
+            owns_client=True,
+        )
+
+    @property
+    def collection_name(self) -> str:
+        """Return the configured Qdrant collection name."""
+
+        return self._collection_name
+
+    @property
+    def top_k(self) -> int:
+        """Return the number of requested search results."""
+
+        return self._top_k
+
+    @property
+    def is_closed(self) -> bool:
+        """Report whether this retriever has been closed."""
+
+        return self._closed
+
+    def validate_collection(
+        self,
+        *,
+        expected_point_count: int | None = None,
+    ) -> int:
+        """
+        Validate the collection and return its point count.
+
+        When expected_point_count is supplied, Qdrant and
+        the source index must contain the same number of
+        document chunks.
+        """
+
+        self._require_open()
+
+        if (
+            expected_point_count is not None
+            and expected_point_count <= 0
+        ):
+            raise ValueError(
+                "The expected point count must be "
+                "greater than zero."
+            )
+
+        collection_exists = (
+            self._client.collection_exists(
+                collection_name=(
+                    self._collection_name
+                ),
+            )
+        )
+
+        if not collection_exists:
+            raise RuntimeError(
+                "The expected Qdrant collection does not "
+                f"exist: {self._collection_name!r}."
+            )
+
+        count_result = self._client.count(
+            collection_name=self._collection_name,
+            exact=True,
+        )
+
+        stored_point_count = int(
+            count_result.count
+        )
+
+        if stored_point_count <= 0:
+            raise RuntimeError(
+                "The Qdrant collection contains no points."
+            )
+
+        if (
+            expected_point_count is not None
+            and stored_point_count
+            != expected_point_count
+        ):
+            raise RuntimeError(
+                "The Qdrant collection and source vector "
+                "index contain different numbers of "
+                "chunks. "
+                f"Qdrant contains {stored_point_count}, "
+                "while the source index contains "
+                f"{expected_point_count}."
+            )
+
+        return stored_point_count
+
+    def retrieve(
+        self,
+        question: str,
+        vector_index: LoadedVectorIndex,
+    ) -> tuple[list[SearchResult], int]:
+        """
+        Retrieve the nearest document chunks from Qdrant.
+
+        The return type matches the retrieval interface
+        expected by the guarded-RAG pipeline.
+        """
+
+        self._require_open()
+
+        cleaned_question = question.strip()
+
+        if not cleaned_question:
+            raise ValueError(
+                "The retrieval question cannot be empty."
+            )
+
+        if not vector_index.chunks:
+            raise ValueError(
+                "The source vector index contains no chunks."
+            )
+
+        (
+            query_embedding,
+            query_token_count,
+        ) = generate_query_embedding(
+            query=cleaned_question,
+            embedding_model=(
+                vector_index.embedding_model
+            ),
+            expected_dimension=(
+                vector_index.embedding_dimension
+            ),
+        )
+
+        response = self._client.query_points(
+            collection_name=self._collection_name,
+            query=query_embedding,
+            limit=self._top_k,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        chunks_by_id = {
+            chunk.chunk_id: chunk
+            for chunk in vector_index.chunks
+        }
+
+        search_results: list[SearchResult] = []
+
+        for point in response.points:
+            raw_payload = point.payload
+
+            if raw_payload is None:
+                raise RuntimeError(
+                    "A Qdrant search result has no payload."
+                )
+
+            payload = dict(
+                raw_payload
+            )
+
+            chunk_id = self._require_payload_string(
+                payload=payload,
+                field_name="chunk_id",
+            )
+
+            matching_chunk = chunks_by_id.get(
+                chunk_id
+            )
+
+            if matching_chunk is None:
+                raise RuntimeError(
+                    "Qdrant returned a chunk ID that is "
+                    "missing from the source vector index: "
+                    f"{chunk_id!r}."
+                )
+
+            search_results.append(
+                SearchResult(
+                    score=float(point.score),
+                    chunk=matching_chunk,
+                )
+            )
+
+        token_count = (
+            int(query_token_count)
+            if query_token_count is not None
+            else 0
+        )
+
+        return (
+            search_results,
+            token_count,
+        )
+
+    def __call__(
+        self,
+        question: str,
+        vector_index: LoadedVectorIndex,
+    ) -> tuple[list[SearchResult], int]:
+        """
+        Allow the retriever object to behave like a function.
+
+        This permits:
+
+            results, tokens = retriever(
+                question,
+                vector_index,
+            )
+        """
+
+        return self.retrieve(
+            question=question,
+            vector_index=vector_index,
+        )
+
+    def close(self) -> None:
+        """Close the owned Qdrant client safely."""
+
+        if self._closed:
+            return
+
+        if self._owns_client:
+            self._client.close()
+
+        self._closed = True
+
+    def __enter__(self) -> QdrantRetriever:
+        """Enter a context-manager block."""
+
+        self._require_open()
+
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the retriever when leaving the block."""
+
+        del exception_type
+        del exception_value
+        del traceback
+
+        self.close()
+
+    def _require_open(self) -> None:
+        """Prevent operations after the retriever is closed."""
+
+        if self._closed:
+            raise RuntimeError(
+                "The Qdrant retriever is already closed."
+            )
+
+    @staticmethod
+    def _require_payload_string(
+        *,
+        payload: dict[str, Any],
+        field_name: str,
+    ) -> str:
+        """Read and validate one Qdrant payload string."""
+
+        value = payload.get(
+            field_name
+        )
+
+        if not isinstance(value, str):
+            raise RuntimeError(
+                "A Qdrant result contains an invalid "
+                f"{field_name!r} payload field."
+            )
+
+        cleaned_value = value.strip()
+
+        if not cleaned_value:
+            raise RuntimeError(
+                "A Qdrant result contains an empty "
+                f"{field_name!r} payload field."
+            )
+
+        return cleaned_value
+
+
+CLASS: lesson_36_guarded_rag_service.GuardedRAGService
+CONSTRUCTOR SIGNATURE: (*, vector_index: 'LoadedVectorIndex', retriever: 'QdrantRetriever', owns_retriever: 'bool' = False) -> 'None'
+
+PUBLIC CALLABLE MEMBERS:
+- answer(self, question: 'str') -> 'guarded.GuardedRAGResult'
+- answer_many(self, questions: 'list[str]') -> 'list[guarded.GuardedRAGResult]'
+- close(self) -> 'None'
+- from_local_qdrant(*, index_path: 'Path' = WindowsPath('data/fleet_vector_index.json'), qdrant_path: 'Path' = WindowsPath('data/qdrant_local'), collection_name: 'str' = 'fleet_manual_chunks', top_k: 'int' = 3) -> 'GuardedRAGService'
+- validate(self) -> 'int'
+
+SOURCE:
+class GuardedRAGService:
+    """
+    Provide a reusable guarded-RAG application service.
+
+    The service combines:
+
+    - A source vector index containing chunk metadata.
+    - A reusable Qdrant retriever.
+    - Lesson 28's retrieval threshold.
+    - Grounded generation.
+    - Citation validation.
+    - Deterministic citation repair.
+    - Extractive fallback.
+    - Final abstention.
+    """
+
+    def __init__(
+        self,
+        *,
+        vector_index: LoadedVectorIndex,
+        retriever: QdrantRetriever,
+        owns_retriever: bool = False,
+    ) -> None:
+        """Initialize the guarded-RAG service."""
+
+        if not vector_index.chunks:
+            raise ValueError(
+                "The source vector index contains no chunks."
+            )
+
+        if retriever.is_closed:
+            raise ValueError(
+                "The supplied Qdrant retriever is closed."
+            )
+
+        self._vector_index = vector_index
+        self._retriever = retriever
+        self._owns_retriever = owns_retriever
+        self._closed = False
+        self._answer_in_progress = False
+
+    @classmethod
+    def from_local_qdrant(
+        cls,
+        *,
+        index_path: Path = INDEX_PATH,
+        qdrant_path: Path = QDRANT_PATH,
+        collection_name: str = COLLECTION_NAME,
+        top_k: int = DEFAULT_TOP_K,
+    ) -> GuardedRAGService:
+        """
+        Build the complete service from persistent storage.
+
+        The resulting service owns the retriever and closes
+        it automatically when the service is closed.
+        """
+
+        if not isinstance(index_path, Path):
+            raise TypeError(
+                "The source index path must be a "
+                "pathlib.Path object."
+            )
+
+        if not isinstance(qdrant_path, Path):
+            raise TypeError(
+                "The Qdrant path must be a "
+                "pathlib.Path object."
+            )
+
+        vector_index = load_vector_index(
+            index_path
+        )
+
+        retriever = QdrantRetriever.from_local_path(
+            path=qdrant_path,
+            collection_name=collection_name,
+            top_k=top_k,
+        )
+
+        try:
+            retriever.validate_collection(
+                expected_point_count=len(
+                    vector_index.chunks
+                )
+            )
+        except Exception:
+            retriever.close()
+            raise
+
+        return cls(
+            vector_index=vector_index,
+            retriever=retriever,
+            owns_retriever=True,
+        )
+
+    @property
+    def is_closed(self) -> bool:
+        """Report whether the service has been closed."""
+
+        return self._closed
+
+    @property
+    def source_chunk_count(self) -> int:
+        """Return the number of source chunks."""
+
+        return len(
+            self._vector_index.chunks
+        )
+
+    @property
+    def collection_name(self) -> str:
+        """Return the active Qdrant collection name."""
+
+        return self._retriever.collection_name
+
+    @property
+    def top_k(self) -> int:
+        """Return the configured retrieval result limit."""
+
+        return self._retriever.top_k
+
+    def validate(self) -> int:
+        """Validate the retriever and source index."""
+
+        self._require_open()
+
+        return self._retriever.validate_collection(
+            expected_point_count=len(
+                self._vector_index.chunks
+            )
+        )
+
+    def answer(
+        self,
+        question: str,
+    ) -> guarded.GuardedRAGResult:
+        """
+        Answer one question through the guarded pipeline.
+
+        The Qdrant retriever is supplied explicitly, so the
+        service does not modify Lesson 28's module-level
+        retrieval dependency.
+        """
+
+        self._require_open()
+
+        cleaned_question = question.strip()
+
+        if not cleaned_question:
+            raise ValueError(
+                "The question cannot be empty."
+            )
+
+        if self._answer_in_progress:
+            raise RuntimeError(
+                "A guarded-RAG answer is already in progress "
+                "for this service."
+            )
+
+        self._answer_in_progress = True
+
+        try:
+            return guarded.run_guarded_rag(
+                question=cleaned_question,
+                vector_index=self._vector_index,
+                retriever=self._retriever,
+            )
+        finally:
+            self._answer_in_progress = False
+
+    def answer_many(
+        self,
+        questions: list[str],
+    ) -> list[guarded.GuardedRAGResult]:
+        """Answer several questions sequentially."""
+
+        self._require_open()
+
+        if not questions:
+            raise ValueError(
+                "At least one question is required."
+            )
+
+        results: list[
+            guarded.GuardedRAGResult
+        ] = []
+
+        for question in questions:
+            result = self.answer(
+                question
+            )
+
+            results.append(
+                result
+            )
+
+        return results
+
+    def close(self) -> None:
+        """Close resources owned by the service."""
+
+        if self._closed:
+            return
+
+        if self._answer_in_progress:
+            raise RuntimeError(
+                "The service cannot be closed while an "
+                "answer is being generated."
+            )
+
+        if self._owns_retriever:
+            self._retriever.close()
+
+        self._closed = True
+
+    def __enter__(self) -> GuardedRAGService:
+        """Enter a context-manager block."""
+
+        self._require_open()
+
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the service when leaving the block."""
+
+        del exception_type
+        del exception_value
+        del traceback
+
+        self.close()
+
+    def _require_open(self) -> None:
+        """Prevent operations after closing the service."""
+
+        if self._closed:
+            raise RuntimeError(
+                "The guarded-RAG service is already closed."
+            )
+
+
+CLASS: lesson_45_configured_ollama_client.ConfiguredOllamaClient
+CONSTRUCTOR SIGNATURE: (settings: 'AppSettings', *, http_client: 'httpx.Client | None' = None) -> 'None'
+
+PUBLIC CALLABLE MEMBERS:
+- close(self) -> 'None'
+- embed(self, inputs: 'str | Sequence[str]') -> 'EmbeddingResult'
+- generate(self, prompt: 'str', *, system_prompt: 'str | None' = None, temperature: 'float' = 0.0) -> 'GenerationResult'
+- health_check(self) -> 'list[str]'
+
+SOURCE:
+class ConfiguredOllamaClient:
+    """
+    Reusable HTTP client for a configured Ollama server.
+
+    The client obtains its base URL, models, and timeout
+    from AppSettings.
+    """
+
+    def __init__(
+        self,
+        settings: AppSettings,
+        *,
+        http_client: httpx.Client | None = None,
+    ) -> None:
+        """Initialize the configured Ollama client."""
+
+        self._settings = settings
+        self._closed = False
+
+        if http_client is None:
+            self._http_client = httpx.Client(
+                base_url=settings.ollama_base_url,
+                timeout=httpx.Timeout(
+                    settings.ollama_timeout_seconds
+                ),
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+            )
+
+            self._owns_http_client = True
+        else:
+            self._http_client = http_client
+            self._owns_http_client = False
+
+    @property
+    def base_url(self) -> str:
+        """Return the configured Ollama base URL."""
+
+        return self._settings.ollama_base_url
+
+    @property
+    def generation_model(self) -> str:
+        """Return the configured generation model."""
+
+        return self._settings.generation_model
+
+    @property
+    def embedding_model(self) -> str:
+        """Return the configured embedding model."""
+
+        return self._settings.embedding_model
+
+    @property
+    def timeout_seconds(self) -> float:
+        """Return the configured request timeout."""
+
+        return self._settings.ollama_timeout_seconds
+
+    @property
+    def is_closed(self) -> bool:
+        """Report whether the component was closed."""
+
+        return self._closed
+
+    def health_check(self) -> list[str]:
+        """
+        Confirm that Ollama is reachable and list models.
+
+        The Ollama tags endpoint returns information about
+        models currently available to the local runtime.
+        """
+
+        self._require_open()
+
+        payload = self._get_json(
+            endpoint="/api/tags"
+        )
+
+        raw_models = payload.get(
+            "models"
+        )
+
+        if not isinstance(raw_models, list):
+            raise RuntimeError(
+                "Ollama returned an invalid models response."
+            )
+
+        model_names: list[str] = []
+
+        for raw_model in raw_models:
+            if not isinstance(raw_model, dict):
+                continue
+
+            name = raw_model.get(
+                "name"
+            )
+
+            if isinstance(name, str) and name.strip():
+                model_names.append(
+                    name.strip()
+                )
+
+        return model_names
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        temperature: float = 0.0,
+    ) -> GenerationResult:
+        """Generate one non-streaming text response."""
+
+        self._require_open()
+
+        cleaned_prompt = prompt.strip()
+
+        if not cleaned_prompt:
+            raise ValueError(
+                "The generation prompt cannot be empty."
+            )
+
+        if temperature < 0.0:
+            raise ValueError(
+                "Temperature cannot be negative."
+            )
+
+        request_payload: dict[str, Any] = {
+            "model": self.generation_model,
+            "prompt": cleaned_prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+            },
+        }
+
+        if system_prompt is not None:
+            cleaned_system_prompt = (
+                system_prompt.strip()
+            )
+
+            if not cleaned_system_prompt:
+                raise ValueError(
+                    "The system prompt cannot be blank."
+                )
+
+            request_payload["system"] = (
+                cleaned_system_prompt
+            )
+
+        payload = self._post_json(
+            endpoint="/api/generate",
+            request_payload=request_payload,
+        )
+
+        model = self._require_string(
+            payload=payload,
+            field_name="model",
+        )
+
+        response_text = self._require_string(
+            payload=payload,
+            field_name="response",
+        )
+
+        prompt_tokens = self._optional_integer(
+            payload=payload,
+            field_name="prompt_eval_count",
+        )
+
+        generated_tokens = self._optional_integer(
+            payload=payload,
+            field_name="eval_count",
+        )
+
+        total_duration = self._optional_integer(
+            payload=payload,
+            field_name="total_duration",
+        )
+
+        return GenerationResult(
+            model=model,
+            response=response_text,
+            prompt_tokens=prompt_tokens,
+            generated_tokens=generated_tokens,
+            total_duration_nanoseconds=(
+                total_duration
+            ),
+        )
+
+    def embed(
+        self,
+        inputs: str | Sequence[str],
+    ) -> EmbeddingResult:
+        """Generate embeddings for one or several texts."""
+
+        self._require_open()
+
+        normalized_inputs = self._normalize_inputs(
+            inputs
+        )
+
+        request_input: str | list[str]
+
+        if isinstance(inputs, str):
+            request_input = normalized_inputs[0]
+        else:
+            request_input = normalized_inputs
+
+        payload = self._post_json(
+            endpoint="/api/embed",
+            request_payload={
+                "model": self.embedding_model,
+                "input": request_input,
+            },
+        )
+
+        model = self._require_string(
+            payload=payload,
+            field_name="model",
+        )
+
+        embeddings = self._require_embeddings(
+            payload
+        )
+
+        if len(embeddings) != len(
+            normalized_inputs
+        ):
+            raise RuntimeError(
+                "Ollama returned a different number of "
+                "embeddings than requested."
+            )
+
+        self._validate_shared_dimension(
+            embeddings
+        )
+
+        input_tokens = self._optional_integer(
+            payload=payload,
+            field_name="prompt_eval_count",
+        )
+
+        total_duration = self._optional_integer(
+            payload=payload,
+            field_name="total_duration",
+        )
+
+        return EmbeddingResult(
+            model=model,
+            embeddings=embeddings,
+            input_tokens=input_tokens,
+            total_duration_nanoseconds=(
+                total_duration
+            ),
+        )
+
+    def close(self) -> None:
+        """Close the owned HTTPX client safely."""
+
+        if self._closed:
+            return
+
+        if self._owns_http_client:
+            self._http_client.close()
+
+        self._closed = True
+
+    def __enter__(
+        self,
+    ) -> ConfiguredOllamaClient:
+        """Enter a context-manager block."""
+
+        self._require_open()
+
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the component after leaving the block."""
+
+        del exception_type
+        del exception_value
+        del traceback
+
+        self.close()
+
+    def _get_json(
+        self,
+        *,
+        endpoint: str,
+    ) -> dict[str, Any]:
+        """Send a GET request and return a JSON object."""
+
+        try:
+            response = self._http_client.get(
+                endpoint
+            )
+
+            response.raise_for_status()
+        except httpx.TimeoutException as error:
+            raise RuntimeError(
+                "The Ollama request timed out."
+            ) from error
+        except httpx.RequestError as error:
+            raise RuntimeError(
+                "Could not connect to the configured "
+                f"Ollama server at {self.base_url}."
+            ) from error
+        except httpx.HTTPStatusError as error:
+            raise RuntimeError(
+                "Ollama returned HTTP status "
+                f"{error.response.status_code}."
+            ) from error
+
+        return self._decode_json_object(
+            response
+        )
+
+    def _post_json(
+        self,
+        *,
+        endpoint: str,
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Send a JSON POST request and decode its response."""
+
+        try:
+            response = self._http_client.post(
+                endpoint,
+                json=request_payload,
+            )
+
+            response.raise_for_status()
+        except httpx.TimeoutException as error:
+            raise RuntimeError(
+                "The Ollama request timed out."
+            ) from error
+        except httpx.RequestError as error:
+            raise RuntimeError(
+                "Could not connect to the configured "
+                f"Ollama server at {self.base_url}."
+            ) from error
+        except httpx.HTTPStatusError as error:
+            raise RuntimeError(
+                "Ollama returned HTTP status "
+                f"{error.response.status_code}."
+            ) from error
+
+        return self._decode_json_object(
+            response
+        )
+
+    @staticmethod
+    def _decode_json_object(
+        response: httpx.Response,
+    ) -> dict[str, Any]:
+        """Decode and validate a JSON object response."""
+
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise RuntimeError(
+                "Ollama returned invalid JSON."
+            ) from error
+
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                "Ollama returned JSON that was not "
+                "an object."
+            )
+
+        return payload
+
+    @staticmethod
+    def _normalize_inputs(
+        inputs: str | Sequence[str],
+    ) -> list[str]:
+        """Validate and normalize embedding inputs."""
+
+        if isinstance(inputs, str):
+            candidates = [
+                inputs
+            ]
+        else:
+            candidates = list(
+                inputs
+            )
+
+        if not candidates:
+            raise ValueError(
+                "At least one embedding input is required."
+            )
+
+        normalized: list[str] = []
+
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                raise TypeError(
+                    "Every embedding input must be a string."
+                )
+
+            cleaned_candidate = candidate.strip()
+
+            if not cleaned_candidate:
+                raise ValueError(
+                    "Embedding inputs cannot be blank."
+                )
+
+            normalized.append(
+                cleaned_candidate
+            )
+
+        return normalized
+
+    @staticmethod
+    def _require_string(
+        *,
+        payload: dict[str, Any],
+        field_name: str,
+    ) -> str:
+        """Read and validate a required string field."""
+
+        value = payload.get(
+            field_name
+        )
+
+        if not isinstance(value, str):
+            raise RuntimeError(
+                "Ollama returned an invalid "
+                f"{field_name!r} field."
+            )
+
+        cleaned_value = value.strip()
+
+        if not cleaned_value:
+            raise RuntimeError(
+                "Ollama returned an empty "
+                f"{field_name!r} field."
+            )
+
+        return cleaned_value
+
+    @staticmethod
+    def _optional_integer(
+        *,
+        payload: dict[str, Any],
+        field_name: str,
+    ) -> int | None:
+        """Read an optional non-negative integer field."""
+
+        value = payload.get(
+            field_name
+        )
+
+        if value is None:
+            return None
+
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+        ):
+            raise RuntimeError(
+                "Ollama returned an invalid "
+                f"{field_name!r} field."
+            )
+
+        return value
+
+    @staticmethod
+    def _require_embeddings(
+        payload: dict[str, Any],
+    ) -> list[list[float]]:
+        """Read and validate Ollama embedding vectors."""
+
+        raw_embeddings = payload.get(
+            "embeddings"
+        )
+
+        if not isinstance(raw_embeddings, list):
+            raise RuntimeError(
+                "Ollama returned an invalid embeddings field."
+            )
+
+        embeddings: list[list[float]] = []
+
+        for raw_vector in raw_embeddings:
+            if (
+                not isinstance(raw_vector, list)
+                or not raw_vector
+            ):
+                raise RuntimeError(
+                    "Ollama returned an invalid "
+                    "embedding vector."
+                )
+
+            vector: list[float] = []
+
+            for raw_value in raw_vector:
+                if (
+                    isinstance(raw_value, bool)
+                    or not isinstance(
+                        raw_value,
+                        int | float,
+                    )
+                ):
+                    raise RuntimeError(
+                        "An embedding contains a "
+                        "non-numeric value."
+                    )
+
+                vector.append(
+                    float(raw_value)
+                )
+
+            embeddings.append(
+                vector
+            )
+
+        if not embeddings:
+            raise RuntimeError(
+                "Ollama returned no embeddings."
+            )
+
+        return embeddings
+
+    @staticmethod
+    def _validate_shared_dimension(
+        embeddings: list[list[float]],
+    ) -> None:
+        """Ensure every returned vector has equal length."""
+
+        expected_dimension = len(
+            embeddings[0]
+        )
+
+        if expected_dimension <= 0:
+            raise RuntimeError(
+                "The embedding dimension must be positive."
+            )
+
+        for vector in embeddings:
+            if len(vector) != expected_dimension:
+                raise RuntimeError(
+                    "Ollama returned embeddings with "
+                    "inconsistent dimensions."
+                )
+
+    def _require_open(self) -> None:
+        """Reject work after the component has closed."""
+
+        if self._closed:
+            raise RuntimeError(
+                "The configured Ollama client is closed."
+            )
+
+
+CLASS: lesson_47_application_runtime.ApplicationRuntime
+CONSTRUCTOR SIGNATURE: (*, settings: 'AppSettings', rag_service: 'GuardedRAGService', ollama_client: 'ConfiguredOllamaClient', owns_rag_service: 'bool' = True, owns_ollama_client: 'bool' = True) -> 'None'
+
+PUBLIC CALLABLE MEMBERS:
+- close(self) -> 'None'
+- from_settings(settings: 'AppSettings') -> 'ApplicationRuntime'
+- validate(self) -> 'RuntimeValidationReport'
+
+SOURCE:
+class ApplicationRuntime:
+    """
+    Own the long-lived dependencies of the RAG application.
+
+    The runtime combines:
+
+    1. Validated application settings.
+    2. The Qdrant-backed guarded-RAG service.
+    3. The configured Ollama HTTP client.
+    """
+
+    def __init__(
+        self,
+        *,
+        settings: AppSettings,
+        rag_service: GuardedRAGService,
+        ollama_client: ConfiguredOllamaClient,
+        owns_rag_service: bool = True,
+        owns_ollama_client: bool = True,
+    ) -> None:
+        """Initialize a runtime from existing dependencies."""
+
+        self._settings = settings
+        self._rag_service = rag_service
+        self._ollama_client = ollama_client
+
+        self._owns_rag_service = owns_rag_service
+        self._owns_ollama_client = owns_ollama_client
+
+        self._closed = False
+        self._validation_report: (
+            RuntimeValidationReport | None
+        ) = None
+
+    @classmethod
+    def from_settings(
+        cls,
+        settings: AppSettings,
+    ) -> ApplicationRuntime:
+        """
+        Build the complete runtime from validated settings.
+
+        If Ollama-client construction fails after the RAG
+        service has been created, the RAG service is closed
+        before the error is re-raised.
+        """
+
+        rag_service = (
+            GuardedRAGService.from_local_qdrant(
+                index_path=settings.vector_index_path,
+                qdrant_path=settings.qdrant_path,
+                collection_name=(
+                    settings.qdrant_collection
+                ),
+                top_k=settings.retrieval_top_k,
+            )
+        )
+
+        try:
+            ollama_client = ConfiguredOllamaClient(
+                settings
+            )
+        except Exception:
+            rag_service.close()
+            raise
+
+        return cls(
+            settings=settings,
+            rag_service=rag_service,
+            ollama_client=ollama_client,
+            owns_rag_service=True,
+            owns_ollama_client=True,
+        )
+
+    @property
+    def settings(self) -> AppSettings:
+        """Return the validated runtime settings."""
+
+        return self._settings
+
+    @property
+    def rag_service(self) -> GuardedRAGService:
+        """Return the managed guarded-RAG service."""
+
+        self._require_open()
+
+        return self._rag_service
+
+    @property
+    def ollama_client(self) -> ConfiguredOllamaClient:
+        """Return the managed Ollama client."""
+
+        self._require_open()
+
+        return self._ollama_client
+
+    @property
+    def is_closed(self) -> bool:
+        """Report whether the runtime has been closed."""
+
+        return self._closed
+
+    @property
+    def validation_report(
+        self,
+    ) -> RuntimeValidationReport | None:
+        """Return the most recent validation report."""
+
+        return self._validation_report
+
+    def validate(self) -> RuntimeValidationReport:
+        """
+        Validate Qdrant and the configured Ollama models.
+
+        Validation confirms that:
+
+        1. The Qdrant collection matches the source index.
+        2. Ollama is reachable.
+        3. The generation model is installed.
+        4. The embedding model is installed.
+        """
+
+        self._require_open()
+
+        stored_point_count = (
+            self._rag_service.validate()
+        )
+
+        available_models = tuple(
+            self._ollama_client.health_check()
+        )
+
+        generation_model_available = (
+            model_is_available(
+                configured_model=(
+                    self._settings.generation_model
+                ),
+                available_models=available_models,
+            )
+        )
+
+        embedding_model_available = (
+            model_is_available(
+                configured_model=(
+                    self._settings.embedding_model
+                ),
+                available_models=available_models,
+            )
+        )
+
+        report = RuntimeValidationReport(
+            stored_point_count=stored_point_count,
+            source_chunk_count=(
+                self._rag_service.source_chunk_count
+            ),
+            collection_name=(
+                self._rag_service.collection_name
+            ),
+            retrieval_top_k=(
+                self._rag_service.top_k
+            ),
+            available_models=available_models,
+            generation_model_available=(
+                generation_model_available
+            ),
+            embedding_model_available=(
+                embedding_model_available
+            ),
+        )
+
+        if not report.all_required_models_available:
+            missing_models: list[str] = []
+
+            if not generation_model_available:
+                missing_models.append(
+                    self._settings.generation_model
+                )
+
+            if not embedding_model_available:
+                missing_models.append(
+                    self._settings.embedding_model
+                )
+
+            raise RuntimeError(
+                "Required Ollama models are unavailable: "
+                + ", ".join(missing_models)
+            )
+
+        self._validation_report = report
+
+        return report
+
+    def close(self) -> None:
+        """Close all runtime-owned dependencies safely."""
+
+        if self._closed:
+            return
+
+        close_error: Exception | None = None
+
+        if self._owns_rag_service:
+            try:
+                self._rag_service.close()
+            except Exception as error:
+                close_error = error
+
+        if self._owns_ollama_client:
+            try:
+                self._ollama_client.close()
+            except Exception as error:
+                if close_error is None:
+                    close_error = error
+
+        self._closed = True
+
+        if close_error is not None:
+            raise RuntimeError(
+                "A runtime dependency could not be "
+                "closed cleanly."
+            ) from close_error
+
+    def __enter__(
+        self,
+    ) -> ApplicationRuntime:
+        """Enter a managed runtime context."""
+
+        self._require_open()
+
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close runtime dependencies when leaving context."""
+
+        del exception_type
+        del exception_value
+        del traceback
+
+        self.close()
+
+    def _require_open(self) -> None:
+        """Reject runtime operations after closure."""
+
+        if self._closed:
+            raise RuntimeError(
+                "The application runtime is closed."
+            )
+
+
+GENERATION AND EMBEDDING CANDIDATES
+===================================
+
+Lesson 28 — Guarded RAG
+-----------------------
+SearchResult: (score: 'float', chunk: 'IndexedChunk') -> None
+build_extractive_answer: (candidate: 'ExtractiveCandidate') -> 'str'
+evaluate_answer: (answer: 'str', sources: 'list[ContextSource]') -> 'tuple[list[SentenceCitationCheck], bool]'
+generate_grounded_answer: (user_message: 'str') -> 'tuple[str, int | None, int | None]'
+generate_query_embedding: (query: 'str', embedding_model: 'str', expected_dimension: 'int') -> 'tuple[list[float], int | None]'
+retrieve_chunks: (question: 'str', vector_index: 'LoadedVectorIndex') -> 'tuple[list[SearchResult], int | None]'
+search_index: (query_embedding: 'list[float]', chunks: 'list[IndexedChunk]', top_k: 'int') -> 'list[SearchResult]'
+
+Lesson 35 — Qdrant Retriever
+----------------------------
+QdrantRetriever: (client: 'QdrantClient', *, collection_name: 'str' = 'fleet_manual_chunks', top_k: 'int' = 3, owns_client: 'bool' = False) -> 'None'
+SearchResult: (score: 'float', chunk: 'IndexedChunk') -> None
+generate_query_embedding: (query: 'str', embedding_model: 'str', expected_dimension: 'int') -> 'tuple[list[float], int | None]'
+print_search_results: (*, question: 'str', search_results: 'list[SearchResult]', query_token_count: 'int') -> 'None'
+
+Lesson 36 — Guarded-RAG Service
+-------------------------------
+QdrantRetriever: (client: 'QdrantClient', *, collection_name: 'str' = 'fleet_manual_chunks', top_k: 'int' = 3, owns_client: 'bool' = False) -> 'None'
+
+Lesson 45 — Configured Ollama Client
+------------------------------------
+ConfiguredOllamaClient: (settings: 'AppSettings', *, http_client: 'httpx.Client | None' = None) -> 'None'
+EmbeddingResult: (model: 'str', embeddings: 'list[list[float]]', input_tokens: 'int | None', total_duration_nanoseconds: 'int | None') -> None
+GenerationResult: (model: 'str', response: 'str', prompt_tokens: 'int | None', generated_tokens: 'int | None', total_duration_nanoseconds: 'int | None') -> None
+
+Lesson 47 — Application Runtime
+-------------------------------
+ConfiguredOllamaClient: (settings: 'AppSettings', *, http_client: 'httpx.Client | None' = None) -> 'None'
+
+COMPLETE MODULE SOURCES
+=======================
+
+Lesson 28 — Guarded RAG
+-----------------------
+FILE: C:\Users\mazya\Projects\generative-ai-learning\lessons\lesson_28_guarded_rag.py
+
+from __future__ import annotations
+
+import collections.abc
+
+import re
+from dataclasses import dataclass
+
+from lessons.lesson_23_search_vector_index import (
+    INDEX_PATH,
+    IndexedChunk,
+    LoadedVectorIndex,
+    SearchResult,
+    generate_query_embedding,
+    load_vector_index,
+    search_index,
+)
+from lessons.lesson_24_grounded_rag import (
+    ContextSource,
+    build_context,
+    build_user_message,
+    expand_results_with_neighbours,
+    generate_grounded_answer,
+)
+from lessons.lesson_25_citation_evaluation import (
+    FALLBACK_ANSWER,
+    MINIMUM_LEXICAL_COVERAGE,
+    SentenceCitationCheck,
+    evaluate_answer,
+    extract_claim_terms,
+    split_sentences,
+)
+from lessons.lesson_25b_deterministic_citation_repair import (
+    CitationDecision,
+    deterministically_repair_citations,
+    find_minimal_supporting_labels,
+    replace_sentence_citations,
+)
+
+
+ABSTENTION_THRESHOLD = 0.5413
+RETRIEVAL_TOP_K = 3
+
+
+DEMO_QUESTIONS = [
+    (
+        "The dashboard has illuminated an engine icon. "
+        "What is the driver expected to do?"
+    ),
+    (
+        "A tire keeps losing air repeatedly. "
+        "Can the vehicle remain in service?"
+    ),
+    (
+        "What password should a driver use to sign in "
+        "to the fleet management system?"
+    ),
+    "What is the fleet insurance policy number?",
+]
+
+
+TERM_ALIASES = {
+    "accidents": "accident",
+    "completed": "complete",
+    "completing": "complete",
+    "contacted": "contact",
+    "contacting": "contact",
+    "crash": "accident",
+    "crashes": "accident",
+    "details": "information",
+    "finished": "complete",
+    "finishes": "complete",
+    "icon": "warning",
+    "illuminated": "warning",
+    "logged": "record",
+    "logging": "record",
+    "loses": "loss",
+    "losing": "loss",
+    "repeated": "repeat",
+    "repeatedly": "repeat",
+    "recorded": "record",
+    "recording": "record",
+    "trips": "route",
+    "trip": "route",
+}
+
+
+@dataclass(frozen=True)
+class ExtractiveCandidate:
+    """One source sentence considered for fallback answering."""
+
+    sentence_number: int
+    sentence: str
+    selected_labels: list[str]
+    lexical_coverage: float
+    missing_support_terms: list[str]
+    question_overlap_count: int
+    question_overlap_ratio: float
+
+
+@dataclass(frozen=True)
+class GuardedRAGResult:
+    """Final outcome of one guarded RAG request."""
+
+    question: str
+    decision: str
+    answer_strategy: str
+    top_similarity: float
+    threshold: float
+    retrieval_results: list[SearchResult]
+    context_sources: list[ContextSource]
+    generated_answer: str | None
+    answer: str
+    generation_called: bool
+    citation_repair_used: bool
+    extractive_fallback_used: bool
+    citation_checks: list[SentenceCitationCheck]
+    citation_decisions: list[CitationDecision]
+    extractive_candidate: ExtractiveCandidate | None
+    answer_passed_validation: bool
+    generation_input_tokens: int | None
+    generation_output_tokens: int | None
+
+
+def normalize_citation_format(
+    answer: str,
+) -> str:
+    """Normalize spacing and move trailing citations before punctuation."""
+
+    normalized_answer = " ".join(
+        answer.split()
+    )
+
+    normalized_answer = re.sub(
+        r"([.!?])\s*((?:\[S\d+\])+)",
+        r" \2\1",
+        normalized_answer,
+    )
+
+    normalized_answer = re.sub(
+        r"(?<=\w)(\[S\d+\])",
+        r" \1",
+        normalized_answer,
+    )
+
+    return normalized_answer.strip()
+
+
+def normalize_term(
+    term: str,
+) -> str:
+    """Normalize selected vocabulary variants."""
+
+    return TERM_ALIASES.get(
+        term,
+        term,
+    )
+
+
+def normalized_content_terms(
+    text: str,
+) -> set[str]:
+    """Extract and normalize important terms from text."""
+
+    return {
+        normalize_term(term)
+        for term in extract_claim_terms(text)
+    }
+
+
+def retrieve_chunks(
+    question: str,
+    vector_index: LoadedVectorIndex,
+) -> tuple[list[SearchResult], int | None]:
+    """Embed a question and retrieve its highest-ranked chunks."""
+
+    (
+        query_embedding,
+        query_token_count,
+    ) = generate_query_embedding(
+        query=question,
+        embedding_model=vector_index.embedding_model,
+        expected_dimension=(
+            vector_index.embedding_dimension
+        ),
+    )
+
+    retrieval_results = search_index(
+        query_embedding=query_embedding,
+        chunks=vector_index.chunks,
+        top_k=RETRIEVAL_TOP_K,
+    )
+
+    if not retrieval_results:
+        raise RuntimeError(
+            "Vector search returned no retrieval results."
+        )
+
+    return (
+        retrieval_results,
+        query_token_count,
+    )
+
+
+def complete_top_section_context(
+    initial_sources: list[ContextSource],
+    top_section_id: str,
+    all_chunks: list[IndexedChunk],
+) -> list[ContextSource]:
+    """Ensure every chunk from the top-ranked section is available."""
+
+    selected_sources = list(
+        initial_sources
+    )
+
+    included_chunk_ids = {
+        source.chunk.chunk_id
+        for source in selected_sources
+    }
+
+    top_section_chunks = sorted(
+        (
+            chunk
+            for chunk in all_chunks
+            if chunk.section_id == top_section_id
+        ),
+        key=lambda chunk: (
+            chunk.start_word,
+            chunk.chunk_number,
+        ),
+    )
+
+    for chunk in top_section_chunks:
+        if chunk.chunk_id in included_chunk_ids:
+            continue
+
+        selected_sources.append(
+            ContextSource(
+                label="",
+                chunk=chunk,
+                retrieval_score=None,
+                inclusion_reason=(
+                    "complete top-ranked section"
+                ),
+            )
+        )
+
+        included_chunk_ids.add(
+            chunk.chunk_id
+        )
+
+    relabelled_sources: list[ContextSource] = []
+
+    for source_number, source in enumerate(
+        selected_sources,
+        start=1,
+    ):
+        relabelled_sources.append(
+            ContextSource(
+                label=f"S{source_number}",
+                chunk=source.chunk,
+                retrieval_score=source.retrieval_score,
+                inclusion_reason=source.inclusion_reason,
+            )
+        )
+
+    return relabelled_sources
+
+
+def reconstruct_section_text(
+    section_id: str,
+    all_chunks: list[IndexedChunk],
+) -> str:
+    """Reconstruct a section from its overlapping chunks."""
+
+    section_chunks = sorted(
+        (
+            chunk
+            for chunk in all_chunks
+            if chunk.section_id == section_id
+        ),
+        key=lambda chunk: (
+            chunk.start_word,
+            chunk.chunk_number,
+        ),
+    )
+
+    if not section_chunks:
+        raise ValueError(
+            f"No chunks were found for section {section_id}."
+        )
+
+    section_start = min(
+        chunk.start_word
+        for chunk in section_chunks
+    )
+
+    section_end = max(
+        chunk.end_word_exclusive
+        for chunk in section_chunks
+    )
+
+    word_slots: list[str | None] = [
+        None
+    ] * (
+        section_end - section_start
+    )
+
+    for chunk in section_chunks:
+        chunk_words = chunk.content.split()
+
+        expected_word_count = (
+            chunk.end_word_exclusive
+            - chunk.start_word
+        )
+
+        if len(chunk_words) != expected_word_count:
+            raise ValueError(
+                f"{chunk.chunk_id} has an inconsistent "
+                "word range."
+            )
+
+        for word_offset, word in enumerate(
+            chunk_words
+        ):
+            absolute_word_index = (
+                chunk.start_word + word_offset
+            )
+
+            slot_index = (
+                absolute_word_index - section_start
+            )
+
+            existing_word = word_slots[
+                slot_index
+            ]
+
+            if (
+                existing_word is not None
+                and existing_word != word
+            ):
+                raise ValueError(
+                    "Overlapping chunks contain different "
+                    f"words at index {absolute_word_index}."
+                )
+
+            word_slots[
+                slot_index
+            ] = word
+
+    if any(
+        word is None
+        for word in word_slots
+    ):
+        raise ValueError(
+            f"Section {section_id} contains a gap between "
+            "its stored chunks."
+        )
+
+    complete_words = [
+        word
+        for word in word_slots
+        if word is not None
+    ]
+
+    return " ".join(
+        complete_words
+    )
+
+
+def build_extractive_candidates(
+    question: str,
+    top_section_id: str,
+    context_sources: list[ContextSource],
+    all_chunks: list[IndexedChunk],
+) -> list[ExtractiveCandidate]:
+    """Create source-supported extractive answer candidates."""
+
+    section_text = reconstruct_section_text(
+        section_id=top_section_id,
+        all_chunks=all_chunks,
+    )
+
+    source_sentences = split_sentences(
+        section_text
+    )
+
+    question_terms = normalized_content_terms(
+        question
+    )
+
+    candidates: list[ExtractiveCandidate] = []
+
+    for sentence_number, sentence in enumerate(
+        source_sentences,
+        start=1,
+    ):
+        (
+            selected_labels,
+            lexical_coverage,
+            missing_support_terms,
+        ) = find_minimal_supporting_labels(
+            sentence=sentence,
+            sources=context_sources,
+        )
+
+        sentence_terms = normalized_content_terms(
+            sentence
+        )
+
+        overlapping_terms = (
+            question_terms
+            & sentence_terms
+        )
+
+        overlap_count = len(
+            overlapping_terms
+        )
+
+        if question_terms:
+            overlap_ratio = (
+                overlap_count
+                / len(question_terms)
+            )
+        else:
+            overlap_ratio = 0.0
+
+        candidates.append(
+            ExtractiveCandidate(
+                sentence_number=sentence_number,
+                sentence=sentence,
+                selected_labels=selected_labels,
+                lexical_coverage=lexical_coverage,
+                missing_support_terms=(
+                    missing_support_terms
+                ),
+                question_overlap_count=overlap_count,
+                question_overlap_ratio=overlap_ratio,
+            )
+        )
+
+    return candidates
+
+
+def select_extractive_candidate(
+    question: str,
+    top_section_id: str,
+    context_sources: list[ContextSource],
+    all_chunks: list[IndexedChunk],
+) -> ExtractiveCandidate | None:
+    """Select the most question-relevant supported sentence."""
+
+    candidates = build_extractive_candidates(
+        question=question,
+        top_section_id=top_section_id,
+        context_sources=context_sources,
+        all_chunks=all_chunks,
+    )
+
+    passing_candidates = [
+        candidate
+        for candidate in candidates
+        if (
+            candidate.lexical_coverage
+            >= MINIMUM_LEXICAL_COVERAGE
+            and candidate.selected_labels
+        )
+    ]
+
+    if not passing_candidates:
+        return None
+
+    return max(
+        passing_candidates,
+        key=lambda candidate: (
+            candidate.question_overlap_count,
+            candidate.question_overlap_ratio,
+            -candidate.sentence_number,
+        ),
+    )
+
+
+def build_extractive_answer(
+    candidate: ExtractiveCandidate,
+) -> str:
+    """Attach validated citations to one source sentence."""
+
+    extractive_answer = replace_sentence_citations(
+        sentence=candidate.sentence,
+        selected_labels=candidate.selected_labels,
+    )
+
+    return normalize_citation_format(
+        extractive_answer
+    )
+
+
+RetrieverFunction = collections.abc.Callable[
+    [str, LoadedVectorIndex],
+    tuple[list[SearchResult], int],
+]
+
+
+def run_guarded_rag(
+    question: str,
+    vector_index: LoadedVectorIndex,
+    *,
+    retriever: RetrieverFunction | None = None,
+) -> GuardedRAGResult:
+    """Run retrieval, abstention, generation, and validation."""
+
+    cleaned_question = question.strip()
+
+    if not cleaned_question:
+        raise ValueError(
+            "The question cannot be empty."
+        )
+
+    active_retriever = (
+        retrieve_chunks
+        if retriever is None
+        else retriever
+    )
+
+    if not callable(active_retriever):
+        raise TypeError(
+            "The retriever must be callable."
+        )
+
+    (
+        retrieval_results,
+        _query_token_count,
+    ) = active_retriever(
+        question=cleaned_question,
+        vector_index=vector_index,
+    )
+
+    top_similarity = (
+        retrieval_results[0].score
+    )
+
+    if top_similarity < ABSTENTION_THRESHOLD:
+        return GuardedRAGResult(
+            question=cleaned_question,
+            decision="ABSTAIN",
+            answer_strategy="retrieval abstention",
+            top_similarity=top_similarity,
+            threshold=ABSTENTION_THRESHOLD,
+            retrieval_results=retrieval_results,
+            context_sources=[],
+            generated_answer=None,
+            answer=FALLBACK_ANSWER,
+            generation_called=False,
+            citation_repair_used=False,
+            extractive_fallback_used=False,
+            citation_checks=[],
+            citation_decisions=[],
+            extractive_candidate=None,
+            answer_passed_validation=True,
+            generation_input_tokens=None,
+            generation_output_tokens=None,
+        )
+
+    initial_context_sources = (
+        expand_results_with_neighbours(
+            results=retrieval_results,
+            all_chunks=vector_index.chunks,
+        )
+    )
+
+    top_section_id = (
+        retrieval_results[0].chunk.section_id
+    )
+
+    context_sources = complete_top_section_context(
+        initial_sources=initial_context_sources,
+        top_section_id=top_section_id,
+        all_chunks=vector_index.chunks,
+    )
+
+    context = build_context(
+        context_sources
+    )
+
+    user_message = build_user_message(
+        question=cleaned_question,
+        context=context,
+    )
+
+    (
+        raw_generated_answer,
+        generation_input_tokens,
+        generation_output_tokens,
+    ) = generate_grounded_answer(
+        user_message
+    )
+
+    generated_answer = normalize_citation_format(
+        raw_generated_answer
+    )
+
+    (
+        generated_checks,
+        generated_answer_passed,
+    ) = evaluate_answer(
+        answer=generated_answer,
+        sources=context_sources,
+    )
+
+    if generated_answer_passed:
+        return GuardedRAGResult(
+            question=cleaned_question,
+            decision="ANSWER",
+            answer_strategy="grounded generation",
+            top_similarity=top_similarity,
+            threshold=ABSTENTION_THRESHOLD,
+            retrieval_results=retrieval_results,
+            context_sources=context_sources,
+            generated_answer=generated_answer,
+            answer=generated_answer,
+            generation_called=True,
+            citation_repair_used=False,
+            extractive_fallback_used=False,
+            citation_checks=generated_checks,
+            citation_decisions=[],
+            extractive_candidate=None,
+            answer_passed_validation=True,
+            generation_input_tokens=(
+                generation_input_tokens
+            ),
+            generation_output_tokens=(
+                generation_output_tokens
+            ),
+        )
+
+    (
+        citation_repaired_answer,
+        citation_decisions,
+    ) = deterministically_repair_citations(
+        answer=generated_answer,
+        sources=context_sources,
+    )
+
+    citation_repaired_answer = (
+        normalize_citation_format(
+            citation_repaired_answer
+        )
+    )
+
+    (
+        citation_repaired_checks,
+        citation_repaired_passed,
+    ) = evaluate_answer(
+        answer=citation_repaired_answer,
+        sources=context_sources,
+    )
+
+    if citation_repaired_passed:
+        return GuardedRAGResult(
+            question=cleaned_question,
+            decision="ANSWER",
+            answer_strategy=(
+                "deterministic citation repair"
+            ),
+            top_similarity=top_similarity,
+            threshold=ABSTENTION_THRESHOLD,
+            retrieval_results=retrieval_results,
+            context_sources=context_sources,
+            generated_answer=generated_answer,
+            answer=citation_repaired_answer,
+            generation_called=True,
+            citation_repair_used=True,
+            extractive_fallback_used=False,
+            citation_checks=citation_repaired_checks,
+            citation_decisions=citation_decisions,
+            extractive_candidate=None,
+            answer_passed_validation=True,
+            generation_input_tokens=(
+                generation_input_tokens
+            ),
+            generation_output_tokens=(
+                generation_output_tokens
+            ),
+        )
+
+    extractive_candidate = (
+        select_extractive_candidate(
+            question=cleaned_question,
+            top_section_id=top_section_id,
+            context_sources=context_sources,
+            all_chunks=vector_index.chunks,
+        )
+    )
+
+    if extractive_candidate is not None:
+        extractive_answer = (
+            build_extractive_answer(
+                extractive_candidate
+            )
+        )
+
+        (
+            extractive_checks,
+            extractive_answer_passed,
+        ) = evaluate_answer(
+            answer=extractive_answer,
+            sources=context_sources,
+        )
+
+        if extractive_answer_passed:
+            return GuardedRAGResult(
+                question=cleaned_question,
+                decision="ANSWER",
+                answer_strategy="extractive fallback",
+                top_similarity=top_similarity,
+                threshold=ABSTENTION_THRESHOLD,
+                retrieval_results=retrieval_results,
+                context_sources=context_sources,
+                generated_answer=generated_answer,
+                answer=extractive_answer,
+                generation_called=True,
+                citation_repair_used=True,
+                extractive_fallback_used=True,
+                citation_checks=extractive_checks,
+                citation_decisions=citation_decisions,
+                extractive_candidate=(
+                    extractive_candidate
+                ),
+                answer_passed_validation=True,
+                generation_input_tokens=(
+                    generation_input_tokens
+                ),
+                generation_output_tokens=(
+                    generation_output_tokens
+                ),
+            )
+
+    return GuardedRAGResult(
+        question=cleaned_question,
+        decision="ABSTAIN_AFTER_VALIDATION",
+        answer_strategy="validation abstention",
+        top_similarity=top_similarity,
+        threshold=ABSTENTION_THRESHOLD,
+        retrieval_results=retrieval_results,
+        context_sources=context_sources,
+        generated_answer=generated_answer,
+        answer=FALLBACK_ANSWER,
+        generation_called=True,
+        citation_repair_used=True,
+        extractive_fallback_used=True,
+        citation_checks=citation_repaired_checks,
+        citation_decisions=citation_decisions,
+        extractive_candidate=extractive_candidate,
+        answer_passed_validation=False,
+        generation_input_tokens=(
+            generation_input_tokens
+        ),
+        generation_output_tokens=(
+            generation_output_tokens
+        ),
+    )
+
+
+def print_retrieval_results(
+    retrieval_results: list[SearchResult],
+) -> None:
+    """Print ranked vector-search results."""
+
+    print("RETRIEVAL RESULTS")
+    print("-----------------")
+
+    for rank, result in enumerate(
+        retrieval_results,
+        start=1,
+    ):
+        chunk = result.chunk
+
+        print(
+            f"{rank}. "
+            f"{chunk.section_title} | "
+            f"{result.score:.4f}"
+        )
+        print(
+            "   Chunk:",
+            chunk.chunk_id,
+        )
+
+    print()
+
+
+def print_context_sources(
+    sources: list[ContextSource],
+) -> None:
+    """Print context sources used for generation."""
+
+    print("CONTEXT SOURCES")
+    print("---------------")
+
+    if not sources:
+        print(
+            "No context was sent to the generation model."
+        )
+        print()
+        return
+
+    for source in sources:
+        print(
+            f"[{source.label}] "
+            f"{source.chunk.section_title} | "
+            f"{source.chunk.chunk_id}"
+        )
+        print(
+            "   Inclusion reason:",
+            source.inclusion_reason,
+        )
+
+        if source.retrieval_score is not None:
+            print(
+                "   Retrieval score:",
+                f"{source.retrieval_score:.4f}",
+            )
+
+    print()
+
+
+def print_citation_checks(
+    checks: list[SentenceCitationCheck],
+) -> None:
+    """Print concise sentence-level citation results."""
+
+    print("CITATION VALIDATION")
+    print("-------------------")
+
+    if not checks:
+        print(
+            "Citation validation was not required."
+        )
+        print()
+        return
+
+    for check in checks:
+        print(
+            f"Sentence {check.sentence_number}:"
+        )
+        print(
+            "  Labels:",
+            check.cited_labels,
+        )
+        print(
+            "  Missing citation:",
+            check.missing_citation,
+        )
+        print(
+            "  Invalid labels:",
+            check.invalid_labels,
+        )
+
+        if check.lexical_coverage is None:
+            print(
+                "  Lexical coverage: not evaluated"
+            )
+        else:
+            print(
+                "  Lexical coverage:",
+                f"{check.lexical_coverage:.2%}",
+            )
+
+        print(
+            "  Support passed:",
+            check.support_passed,
+        )
+
+    print()
+
+
+def print_citation_decisions(
+    decisions: list[CitationDecision],
+) -> None:
+    """Print deterministic citation-repair decisions."""
+
+    print("DETERMINISTIC CITATION REPAIR")
+    print("-----------------------------")
+
+    if not decisions:
+        print(
+            "Deterministic citation repair was not used."
+        )
+        print()
+        return
+
+    for decision in decisions:
+        print(
+            f"Sentence {decision.sentence_number}:"
+        )
+        print(
+            "  Selected labels:",
+            decision.selected_labels,
+        )
+        print(
+            "  Lexical coverage:",
+            f"{decision.lexical_coverage:.2%}",
+        )
+        print(
+            "  Threshold met:",
+            decision.threshold_met,
+        )
+
+    print()
+
+
+def print_extractive_candidate(
+    candidate: ExtractiveCandidate | None,
+) -> None:
+    """Print extractive-fallback details."""
+
+    print("EXTRACTIVE FALLBACK")
+    print("-------------------")
+
+    if candidate is None:
+        print(
+            "Extractive fallback was not used."
+        )
+        print()
+        return
+
+    print(
+        "Selected source sentence:",
+        candidate.sentence_number,
+    )
+    print(
+        "Selected labels:",
+        candidate.selected_labels,
+    )
+    print(
+        "Lexical support:",
+        f"{candidate.lexical_coverage:.2%}",
+    )
+    print(
+        "Question-term overlap:",
+        candidate.question_overlap_count,
+    )
+    print(
+        "Question overlap ratio:",
+        f"{candidate.question_overlap_ratio:.2%}",
+    )
+    print()
+
+
+def print_guarded_result(
+    result_number: int,
+    result: GuardedRAGResult,
+) -> None:
+    """Print one complete guarded-RAG outcome."""
+
+    print(
+        f"QUESTION {result_number}"
+    )
+    print(
+        "=" * (
+            9 + len(str(result_number))
+        )
+    )
+    print(result.question)
+    print()
+
+    print(
+        "Top similarity:",
+        f"{result.top_similarity:.4f}",
+    )
+    print(
+        "Abstention threshold:",
+        f"{result.threshold:.4f}",
+    )
+    print(
+        "Decision:",
+        result.decision,
+    )
+    print(
+        "Answer strategy:",
+        result.answer_strategy,
+    )
+    print(
+        "Generation model called:",
+        result.generation_called,
+    )
+    print(
+        "Citation repair used:",
+        result.citation_repair_used,
+    )
+    print(
+        "Extractive fallback used:",
+        result.extractive_fallback_used,
+    )
+    print()
+
+    print_retrieval_results(
+        result.retrieval_results
+    )
+
+    print_context_sources(
+        result.context_sources
+    )
+
+    if (
+        result.generated_answer is not None
+        and result.generated_answer != result.answer
+    ):
+        print("INITIAL GENERATED ANSWER")
+        print("------------------------")
+        print(result.generated_answer)
+        print()
+
+    print("FINAL ANSWER")
+    print("------------")
+    print(result.answer)
+    print()
+
+    print_citation_checks(
+        result.citation_checks
+    )
+
+    print_citation_decisions(
+        result.citation_decisions
+    )
+
+    print_extractive_candidate(
+        result.extractive_candidate
+    )
+
+    print(
+        "Answer passed validation:",
+        result.answer_passed_validation,
+    )
+
+    if result.generation_input_tokens is not None:
+        print(
+            "Generation input tokens:",
+            result.generation_input_tokens,
+        )
+
+    if result.generation_output_tokens is not None:
+        print(
+            "Generation output tokens:",
+            result.generation_output_tokens,
+        )
+
+    print()
+    print()
+
+
+def main() -> None:
+    """Demonstrate guarded RAG with extractive fallback."""
+
+    vector_index = load_vector_index(
+        INDEX_PATH
+    )
+
+    print(
+        "GUARDED RAG WITH EXTRACTIVE FALLBACK"
+    )
+    print(
+        "===================================="
+    )
+    print()
+    print(
+        "Vector index:",
+        INDEX_PATH,
+    )
+    print(
+        "Embedding model:",
+        vector_index.embedding_model,
+    )
+    print(
+        "Indexed chunks:",
+        len(vector_index.chunks),
+    )
+    print(
+        "Retrieval top-k:",
+        RETRIEVAL_TOP_K,
+    )
+    print(
+        "Abstention threshold:",
+        f"{ABSTENTION_THRESHOLD:.4f}",
+    )
+    print(
+        "Questions:",
+        len(DEMO_QUESTIONS),
+    )
+    print()
+
+    results: list[GuardedRAGResult] = []
+
+    for question_number, question in enumerate(
+        DEMO_QUESTIONS,
+        start=1,
+    ):
+        print(
+            f"Processing question "
+            f"{question_number}/{len(DEMO_QUESTIONS)}..."
+        )
+
+        result = run_guarded_rag(
+            question=question,
+            vector_index=vector_index,
+        )
+
+        results.append(
+            result
+        )
+
+    print()
+    print(
+        "All guarded RAG requests completed."
+    )
+    print()
+    print()
+
+    for result_number, result in enumerate(
+        results,
+        start=1,
+    ):
+        print_guarded_result(
+            result_number=result_number,
+            result=result,
+        )
+
+    answer_count = sum(
+        result.decision == "ANSWER"
+        for result in results
+    )
+
+    direct_abstention_count = sum(
+        result.decision == "ABSTAIN"
+        for result in results
+    )
+
+    validation_abstention_count = sum(
+        result.decision
+        == "ABSTAIN_AFTER_VALIDATION"
+        for result in results
+    )
+
+    generation_call_count = sum(
+        result.generation_called
+        for result in results
+    )
+
+    repair_count = sum(
+        result.citation_repair_used
+        for result in results
+    )
+
+    extractive_fallback_count = sum(
+        result.extractive_fallback_used
+        and result.decision == "ANSWER"
+        for result in results
+    )
+
+    print("SUMMARY")
+    print("=======")
+    print(
+        "Questions processed:",
+        len(results),
+    )
+    print(
+        "Answers returned:",
+        answer_count,
+    )
+    print(
+        "Retrieval-based abstentions:",
+        direct_abstention_count,
+    )
+    print(
+        "Validation-based abstentions:",
+        validation_abstention_count,
+    )
+    print(
+        "Generation model calls:",
+        generation_call_count,
+    )
+    print(
+        "Citation repairs attempted:",
+        repair_count,
+    )
+    print(
+        "Extractive fallback answers:",
+        extractive_fallback_count,
+    )
+    print()
+
+    print("SAFETY INTERPRETATION")
+    print("=====================")
+    print(
+        "Questions below the retrieval threshold were "
+        "rejected before any context was sent to Llama."
+    )
+    print(
+        "Generated answers were returned only after "
+        "citation validation."
+    )
+    print(
+        "When a supported paraphrase failed strict lexical "
+        "validation, the system attempted a source-verbatim "
+        "extractive fallback."
+    )
+    print(
+        "The retrieval threshold and lexical rules remain "
+        "specific to this educational dataset."
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+Lesson 35 — Qdrant Retriever
+----------------------------
+FILE: C:\Users\mazya\Projects\generative-ai-learning\lessons\lesson_35_qdrant_retriever_component.py
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import TracebackType
+from typing import Any
+
+from qdrant_client import QdrantClient
+
+from lessons.lesson_23_search_vector_index import (
+    INDEX_PATH,
+    LoadedVectorIndex,
+    SearchResult,
+    generate_query_embedding,
+    load_vector_index,
+)
+from lessons.lesson_30_qdrant_local_index import (
+    COLLECTION_NAME,
+    QDRANT_PATH,
+)
+
+
+DEFAULT_TOP_K = 3
+
+TEST_QUESTIONS = [
+    (
+        "What should a driver do when an engine "
+        "warning light appears?"
+    ),
+    (
+        "Can a vehicle remain in service after "
+        "repeated tire-pressure loss?"
+    ),
+]
+
+
+class QdrantRetriever:
+    """
+    Retrieve indexed document chunks from Qdrant.
+
+    The component accepts an existing Qdrant client so it
+    can be used with local storage, a Docker server, or a
+    remote Qdrant deployment.
+    """
+
+    def __init__(
+        self,
+        client: QdrantClient,
+        *,
+        collection_name: str = COLLECTION_NAME,
+        top_k: int = DEFAULT_TOP_K,
+        owns_client: bool = False,
+    ) -> None:
+        """Initialize the reusable retriever component."""
+
+        cleaned_collection_name = (
+            collection_name.strip()
+        )
+
+        if not cleaned_collection_name:
+            raise ValueError(
+                "The Qdrant collection name cannot be empty."
+            )
+
+        if top_k <= 0:
+            raise ValueError(
+                "The retrieval top_k value must be "
+                "greater than zero."
+            )
+
+        self._client = client
+        self._collection_name = (
+            cleaned_collection_name
+        )
+        self._top_k = top_k
+        self._owns_client = owns_client
+        self._closed = False
+
+    @classmethod
+    def from_local_path(
+        cls,
+        path: Path,
+        *,
+        collection_name: str = COLLECTION_NAME,
+        top_k: int = DEFAULT_TOP_K,
+    ) -> QdrantRetriever:
+        """Create a retriever for persistent local storage."""
+
+        if not isinstance(path, Path):
+            raise TypeError(
+                "The local Qdrant path must be a "
+                "pathlib.Path object."
+            )
+
+        if not path.exists():
+            raise FileNotFoundError(
+                "The local Qdrant storage directory "
+                f"does not exist: {path}"
+            )
+
+        client = QdrantClient(
+            path=str(path)
+        )
+
+        return cls(
+            client=client,
+            collection_name=collection_name,
+            top_k=top_k,
+            owns_client=True,
+        )
+
+    @property
+    def collection_name(self) -> str:
+        """Return the configured Qdrant collection name."""
+
+        return self._collection_name
+
+    @property
+    def top_k(self) -> int:
+        """Return the number of requested search results."""
+
+        return self._top_k
+
+    @property
+    def is_closed(self) -> bool:
+        """Report whether this retriever has been closed."""
+
+        return self._closed
+
+    def validate_collection(
+        self,
+        *,
+        expected_point_count: int | None = None,
+    ) -> int:
+        """
+        Validate the collection and return its point count.
+
+        When expected_point_count is supplied, Qdrant and
+        the source index must contain the same number of
+        document chunks.
+        """
+
+        self._require_open()
+
+        if (
+            expected_point_count is not None
+            and expected_point_count <= 0
+        ):
+            raise ValueError(
+                "The expected point count must be "
+                "greater than zero."
+            )
+
+        collection_exists = (
+            self._client.collection_exists(
+                collection_name=(
+                    self._collection_name
+                ),
+            )
+        )
+
+        if not collection_exists:
+            raise RuntimeError(
+                "The expected Qdrant collection does not "
+                f"exist: {self._collection_name!r}."
+            )
+
+        count_result = self._client.count(
+            collection_name=self._collection_name,
+            exact=True,
+        )
+
+        stored_point_count = int(
+            count_result.count
+        )
+
+        if stored_point_count <= 0:
+            raise RuntimeError(
+                "The Qdrant collection contains no points."
+            )
+
+        if (
+            expected_point_count is not None
+            and stored_point_count
+            != expected_point_count
+        ):
+            raise RuntimeError(
+                "The Qdrant collection and source vector "
+                "index contain different numbers of "
+                "chunks. "
+                f"Qdrant contains {stored_point_count}, "
+                "while the source index contains "
+                f"{expected_point_count}."
+            )
+
+        return stored_point_count
+
+    def retrieve(
+        self,
+        question: str,
+        vector_index: LoadedVectorIndex,
+    ) -> tuple[list[SearchResult], int]:
+        """
+        Retrieve the nearest document chunks from Qdrant.
+
+        The return type matches the retrieval interface
+        expected by the guarded-RAG pipeline.
+        """
+
+        self._require_open()
+
+        cleaned_question = question.strip()
+
+        if not cleaned_question:
+            raise ValueError(
+                "The retrieval question cannot be empty."
+            )
+
+        if not vector_index.chunks:
+            raise ValueError(
+                "The source vector index contains no chunks."
+            )
+
+        (
+            query_embedding,
+            query_token_count,
+        ) = generate_query_embedding(
+            query=cleaned_question,
+            embedding_model=(
+                vector_index.embedding_model
+            ),
+            expected_dimension=(
+                vector_index.embedding_dimension
+            ),
+        )
+
+        response = self._client.query_points(
+            collection_name=self._collection_name,
+            query=query_embedding,
+            limit=self._top_k,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        chunks_by_id = {
+            chunk.chunk_id: chunk
+            for chunk in vector_index.chunks
+        }
+
+        search_results: list[SearchResult] = []
+
+        for point in response.points:
+            raw_payload = point.payload
+
+            if raw_payload is None:
+                raise RuntimeError(
+                    "A Qdrant search result has no payload."
+                )
+
+            payload = dict(
+                raw_payload
+            )
+
+            chunk_id = self._require_payload_string(
+                payload=payload,
+                field_name="chunk_id",
+            )
+
+            matching_chunk = chunks_by_id.get(
+                chunk_id
+            )
+
+            if matching_chunk is None:
+                raise RuntimeError(
+                    "Qdrant returned a chunk ID that is "
+                    "missing from the source vector index: "
+                    f"{chunk_id!r}."
+                )
+
+            search_results.append(
+                SearchResult(
+                    score=float(point.score),
+                    chunk=matching_chunk,
+                )
+            )
+
+        token_count = (
+            int(query_token_count)
+            if query_token_count is not None
+            else 0
+        )
+
+        return (
+            search_results,
+            token_count,
+        )
+
+    def __call__(
+        self,
+        question: str,
+        vector_index: LoadedVectorIndex,
+    ) -> tuple[list[SearchResult], int]:
+        """
+        Allow the retriever object to behave like a function.
+
+        This permits:
+
+            results, tokens = retriever(
+                question,
+                vector_index,
+            )
+        """
+
+        return self.retrieve(
+            question=question,
+            vector_index=vector_index,
+        )
+
+    def close(self) -> None:
+        """Close the owned Qdrant client safely."""
+
+        if self._closed:
+            return
+
+        if self._owns_client:
+            self._client.close()
+
+        self._closed = True
+
+    def __enter__(self) -> QdrantRetriever:
+        """Enter a context-manager block."""
+
+        self._require_open()
+
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the retriever when leaving the block."""
+
+        del exception_type
+        del exception_value
+        del traceback
+
+        self.close()
+
+    def _require_open(self) -> None:
+        """Prevent operations after the retriever is closed."""
+
+        if self._closed:
+            raise RuntimeError(
+                "The Qdrant retriever is already closed."
+            )
+
+    @staticmethod
+    def _require_payload_string(
+        *,
+        payload: dict[str, Any],
+        field_name: str,
+    ) -> str:
+        """Read and validate one Qdrant payload string."""
+
+        value = payload.get(
+            field_name
+        )
+
+        if not isinstance(value, str):
+            raise RuntimeError(
+                "A Qdrant result contains an invalid "
+                f"{field_name!r} payload field."
+            )
+
+        cleaned_value = value.strip()
+
+        if not cleaned_value:
+            raise RuntimeError(
+                "A Qdrant result contains an empty "
+                f"{field_name!r} payload field."
+            )
+
+        return cleaned_value
+
+
+def print_search_results(
+    *,
+    question: str,
+    search_results: list[SearchResult],
+    query_token_count: int,
+) -> None:
+    """Print one reusable-retriever demonstration."""
+
+    print("QUESTION")
+    print("--------")
+    print(question)
+    print()
+
+    print(
+        "Query input tokens:",
+        query_token_count,
+    )
+    print()
+
+    print("QDRANT RESULTS")
+    print("---------------")
+
+    if not search_results:
+        print(
+            "No document chunks were returned."
+        )
+        print()
+        return
+
+    for rank, result in enumerate(
+        search_results,
+        start=1,
+    ):
+        print(
+            f"Rank: {rank}"
+        )
+        print(
+            "Similarity:",
+            f"{result.score:.4f}",
+        )
+        print(
+            "Chunk ID:",
+            result.chunk.chunk_id,
+        )
+        print(
+            "Section:",
+            result.chunk.section_title,
+        )
+        print(
+            "Content:"
+        )
+        print(
+            result.chunk.content
+        )
+        print()
+
+
+def main() -> None:
+    """Demonstrate the reusable Qdrant retriever."""
+
+    vector_index = load_vector_index(
+        INDEX_PATH
+    )
+
+    print("REUSABLE QDRANT RETRIEVER")
+    print("==========================")
+    print()
+    print(
+        "Storage path:",
+        QDRANT_PATH,
+    )
+    print(
+        "Collection:",
+        COLLECTION_NAME,
+    )
+    print(
+        "Embedding model:",
+        vector_index.embedding_model,
+    )
+    print(
+        "Embedding dimension:",
+        vector_index.embedding_dimension,
+    )
+    print(
+        "Source chunks:",
+        len(vector_index.chunks),
+    )
+    print()
+
+    with QdrantRetriever.from_local_path(
+        path=QDRANT_PATH,
+        collection_name=COLLECTION_NAME,
+        top_k=DEFAULT_TOP_K,
+    ) as retriever:
+        print(
+            "1. Validating the persistent collection..."
+        )
+
+        stored_point_count = (
+            retriever.validate_collection(
+                expected_point_count=len(
+                    vector_index.chunks
+                ),
+            )
+        )
+
+        print(
+            "   Collection validated."
+        )
+        print(
+            "   Stored points:",
+            stored_point_count,
+        )
+        print(
+            "   Retrieval top K:",
+            retriever.top_k,
+        )
+        print()
+
+        print(
+            "2. Running reusable retrieval..."
+        )
+        print()
+
+        for question_number, question in enumerate(
+            TEST_QUESTIONS,
+            start=1,
+        ):
+            print("=" * 70)
+            print(
+                f"RETRIEVAL EXAMPLE {question_number}"
+            )
+            print("=" * 70)
+
+            (
+                search_results,
+                query_token_count,
+            ) = retriever(
+                question,
+                vector_index,
+            )
+
+            print_search_results(
+                question=question,
+                search_results=search_results,
+                query_token_count=query_token_count,
+            )
+
+        print("COMPONENT STATUS")
+        print("----------------")
+        print(
+            "Retriever closed inside block:",
+            retriever.is_closed,
+        )
+
+    print(
+        "Retriever closed after block:",
+        retriever.is_closed,
+    )
+    print()
+
+    print("STATUS")
+    print("------")
+    print(
+        "Qdrant retrieval is now packaged as a "
+        "reusable application component."
+    )
+    print(
+        "The component can be passed into future RAG "
+        "pipelines without duplicating retrieval logic."
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+Lesson 36 — Guarded-RAG Service
+-------------------------------
+FILE: C:\Users\mazya\Projects\generative-ai-learning\lessons\lesson_36_guarded_rag_service.py
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import TracebackType
+
+from lessons import lesson_28_guarded_rag as guarded
+from lessons.lesson_23_search_vector_index import (
+    INDEX_PATH,
+    LoadedVectorIndex,
+    load_vector_index,
+)
+from lessons.lesson_30_qdrant_local_index import (
+    COLLECTION_NAME,
+    QDRANT_PATH,
+)
+from lessons.lesson_35_qdrant_retriever_component import (
+    DEFAULT_TOP_K,
+    QdrantRetriever,
+)
+
+
+QUESTIONS = [
+    (
+        "What should a driver do when an engine "
+        "warning light appears?"
+    ),
+    (
+        "Can a vehicle remain in service after "
+        "repeated tire-pressure loss?"
+    ),
+    "What is the driver's account password?",
+    "What is the fleet insurance policy number?",
+]
+
+
+class GuardedRAGService:
+    """
+    Provide a reusable guarded-RAG application service.
+
+    The service combines:
+
+    - A source vector index containing chunk metadata.
+    - A reusable Qdrant retriever.
+    - Lesson 28's retrieval threshold.
+    - Grounded generation.
+    - Citation validation.
+    - Deterministic citation repair.
+    - Extractive fallback.
+    - Final abstention.
+    """
+
+    def __init__(
+        self,
+        *,
+        vector_index: LoadedVectorIndex,
+        retriever: QdrantRetriever,
+        owns_retriever: bool = False,
+    ) -> None:
+        """Initialize the guarded-RAG service."""
+
+        if not vector_index.chunks:
+            raise ValueError(
+                "The source vector index contains no chunks."
+            )
+
+        if retriever.is_closed:
+            raise ValueError(
+                "The supplied Qdrant retriever is closed."
+            )
+
+        self._vector_index = vector_index
+        self._retriever = retriever
+        self._owns_retriever = owns_retriever
+        self._closed = False
+        self._answer_in_progress = False
+
+    @classmethod
+    def from_local_qdrant(
+        cls,
+        *,
+        index_path: Path = INDEX_PATH,
+        qdrant_path: Path = QDRANT_PATH,
+        collection_name: str = COLLECTION_NAME,
+        top_k: int = DEFAULT_TOP_K,
+    ) -> GuardedRAGService:
+        """
+        Build the complete service from persistent storage.
+
+        The resulting service owns the retriever and closes
+        it automatically when the service is closed.
+        """
+
+        if not isinstance(index_path, Path):
+            raise TypeError(
+                "The source index path must be a "
+                "pathlib.Path object."
+            )
+
+        if not isinstance(qdrant_path, Path):
+            raise TypeError(
+                "The Qdrant path must be a "
+                "pathlib.Path object."
+            )
+
+        vector_index = load_vector_index(
+            index_path
+        )
+
+        retriever = QdrantRetriever.from_local_path(
+            path=qdrant_path,
+            collection_name=collection_name,
+            top_k=top_k,
+        )
+
+        try:
+            retriever.validate_collection(
+                expected_point_count=len(
+                    vector_index.chunks
+                )
+            )
+        except Exception:
+            retriever.close()
+            raise
+
+        return cls(
+            vector_index=vector_index,
+            retriever=retriever,
+            owns_retriever=True,
+        )
+
+    @property
+    def is_closed(self) -> bool:
+        """Report whether the service has been closed."""
+
+        return self._closed
+
+    @property
+    def source_chunk_count(self) -> int:
+        """Return the number of source chunks."""
+
+        return len(
+            self._vector_index.chunks
+        )
+
+    @property
+    def collection_name(self) -> str:
+        """Return the active Qdrant collection name."""
+
+        return self._retriever.collection_name
+
+    @property
+    def top_k(self) -> int:
+        """Return the configured retrieval result limit."""
+
+        return self._retriever.top_k
+
+    def validate(self) -> int:
+        """Validate the retriever and source index."""
+
+        self._require_open()
+
+        return self._retriever.validate_collection(
+            expected_point_count=len(
+                self._vector_index.chunks
+            )
+        )
+
+    def answer(
+        self,
+        question: str,
+    ) -> guarded.GuardedRAGResult:
+        """
+        Answer one question through the guarded pipeline.
+
+        The Qdrant retriever is supplied explicitly, so the
+        service does not modify Lesson 28's module-level
+        retrieval dependency.
+        """
+
+        self._require_open()
+
+        cleaned_question = question.strip()
+
+        if not cleaned_question:
+            raise ValueError(
+                "The question cannot be empty."
+            )
+
+        if self._answer_in_progress:
+            raise RuntimeError(
+                "A guarded-RAG answer is already in progress "
+                "for this service."
+            )
+
+        self._answer_in_progress = True
+
+        try:
+            return guarded.run_guarded_rag(
+                question=cleaned_question,
+                vector_index=self._vector_index,
+                retriever=self._retriever,
+            )
+        finally:
+            self._answer_in_progress = False
+
+    def answer_many(
+        self,
+        questions: list[str],
+    ) -> list[guarded.GuardedRAGResult]:
+        """Answer several questions sequentially."""
+
+        self._require_open()
+
+        if not questions:
+            raise ValueError(
+                "At least one question is required."
+            )
+
+        results: list[
+            guarded.GuardedRAGResult
+        ] = []
+
+        for question in questions:
+            result = self.answer(
+                question
+            )
+
+            results.append(
+                result
+            )
+
+        return results
+
+    def close(self) -> None:
+        """Close resources owned by the service."""
+
+        if self._closed:
+            return
+
+        if self._answer_in_progress:
+            raise RuntimeError(
+                "The service cannot be closed while an "
+                "answer is being generated."
+            )
+
+        if self._owns_retriever:
+            self._retriever.close()
+
+        self._closed = True
+
+    def __enter__(self) -> GuardedRAGService:
+        """Enter a context-manager block."""
+
+        self._require_open()
+
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the service when leaving the block."""
+
+        del exception_type
+        del exception_value
+        del traceback
+
+        self.close()
+
+    def _require_open(self) -> None:
+        """Prevent operations after closing the service."""
+
+        if self._closed:
+            raise RuntimeError(
+                "The guarded-RAG service is already closed."
+            )
+
+
+def print_result(
+    *,
+    question_number: int,
+    result: guarded.GuardedRAGResult,
+) -> None:
+    """Print one service response."""
+
+    print("=" * 70)
+    print(
+        f"QUESTION {question_number}"
+    )
+    print("=" * 70)
+    print(result.question)
+    print()
+
+    print("RETRIEVAL")
+    print("---------")
+    print(
+        "Top similarity:",
+        f"{result.top_similarity:.4f}",
+    )
+    print(
+        "Threshold:",
+        f"{result.threshold:.4f}",
+    )
+
+    if result.retrieval_results:
+        print(
+            "Top section:",
+            (
+                result.retrieval_results[
+                    0
+                ].chunk.section_title
+            ),
+        )
+        print(
+            "Top chunk:",
+            (
+                result.retrieval_results[
+                    0
+                ].chunk.chunk_id
+            ),
+        )
+    else:
+        print(
+            "Top section:",
+            "none",
+        )
+        print(
+            "Top chunk:",
+            "none",
+        )
+
+    print()
+
+    print("DECISION")
+    print("--------")
+    print(
+        "Decision:",
+        result.decision,
+    )
+    print(
+        "Strategy:",
+        result.answer_strategy,
+    )
+    print(
+        "Generation called:",
+        result.generation_called,
+    )
+    print(
+        "Citation repair used:",
+        result.citation_repair_used,
+    )
+    print(
+        "Extractive fallback used:",
+        result.extractive_fallback_used,
+    )
+    print(
+        "Validation passed:",
+        result.answer_passed_validation,
+    )
+    print()
+
+    print("ANSWER")
+    print("------")
+    print(result.answer)
+    print()
+
+
+def print_summary(
+    results: list[guarded.GuardedRAGResult],
+) -> None:
+    """Print aggregate service results."""
+
+    answer_count = sum(
+        result.decision == "ANSWER"
+        for result in results
+    )
+
+    retrieval_abstention_count = sum(
+        result.answer_strategy
+        == "retrieval abstention"
+        for result in results
+    )
+
+    validation_abstention_count = sum(
+        result.answer_strategy
+        == "validation abstention"
+        for result in results
+    )
+
+    generation_count = sum(
+        result.generation_called
+        for result in results
+    )
+
+    repair_count = sum(
+        result.citation_repair_used
+        for result in results
+    )
+
+    fallback_answer_count = sum(
+        result.extractive_fallback_used
+        and result.decision == "ANSWER"
+        for result in results
+    )
+
+    print("=" * 70)
+    print("GUARDED-RAG SERVICE SUMMARY")
+    print("=" * 70)
+    print(
+        "Questions:",
+        len(results),
+    )
+    print(
+        "Answers:",
+        answer_count,
+    )
+    print(
+        "Retrieval abstentions:",
+        retrieval_abstention_count,
+    )
+    print(
+        "Validation abstentions:",
+        validation_abstention_count,
+    )
+    print(
+        "Generation calls:",
+        generation_count,
+    )
+    print(
+        "Citation repairs:",
+        repair_count,
+    )
+    print(
+        "Extractive fallback answers:",
+        fallback_answer_count,
+    )
+    print()
+
+
+def main() -> None:
+    """Demonstrate the reusable guarded-RAG service."""
+
+    print("REUSABLE GUARDED-RAG SERVICE")
+    print("============================")
+    print()
+    print(
+        "Source index:",
+        INDEX_PATH,
+    )
+    print(
+        "Qdrant storage:",
+        QDRANT_PATH,
+    )
+    print(
+        "Collection:",
+        COLLECTION_NAME,
+    )
+    print()
+
+    with GuardedRAGService.from_local_qdrant(
+        index_path=INDEX_PATH,
+        qdrant_path=QDRANT_PATH,
+        collection_name=COLLECTION_NAME,
+        top_k=DEFAULT_TOP_K,
+    ) as service:
+        print(
+            "1. Validating the complete service..."
+        )
+
+        stored_point_count = service.validate()
+
+        print(
+            "   Service validated."
+        )
+        print(
+            "   Source chunks:",
+            service.source_chunk_count,
+        )
+        print(
+            "   Stored Qdrant points:",
+            stored_point_count,
+        )
+        print(
+            "   Retrieval top K:",
+            service.top_k,
+        )
+        print()
+
+        print(
+            "2. Answering questions through the service..."
+        )
+        print()
+
+        results = service.answer_many(
+            QUESTIONS
+        )
+
+        for question_number, result in enumerate(
+            results,
+            start=1,
+        ):
+            print_result(
+                question_number=question_number,
+                result=result,
+            )
+
+        print_summary(
+            results
+        )
+
+        print("SERVICE STATE")
+        print("-------------")
+        print(
+            "Closed inside context:",
+            service.is_closed,
+        )
+        print()
+
+    print(
+        "Closed after context:",
+        service.is_closed,
+    )
+    print()
+
+    print("STATUS")
+    print("------")
+    print(
+        "The application now has one reusable service "
+        "for Qdrant retrieval and guarded answer generation."
+    )
+    print(
+        "Callers no longer need to configure or restore "
+        "the retrieval dependency manually."
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+Lesson 45 — Configured Ollama Client
+------------------------------------
+FILE: C:\Users\mazya\Projects\generative-ai-learning\lessons\lesson_45_configured_ollama_client.py
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from types import TracebackType
+from typing import Any
+
+import httpx
+
+from lessons.lesson_42_application_settings import (
+    AppSettings,
+    get_settings,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationResult:
+    """Validated result from Ollama text generation."""
+
+    model: str
+    response: str
+    prompt_tokens: int | None
+    generated_tokens: int | None
+    total_duration_nanoseconds: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingResult:
+    """Validated result from Ollama embedding generation."""
+
+    model: str
+    embeddings: list[list[float]]
+    input_tokens: int | None
+    total_duration_nanoseconds: int | None
+
+    @property
+    def embedding_count(self) -> int:
+        """Return the number of generated vectors."""
+
+        return len(self.embeddings)
+
+    @property
+    def embedding_dimension(self) -> int:
+        """Return the shared vector dimension."""
+
+        if not self.embeddings:
+            return 0
+
+        return len(self.embeddings[0])
+
+
+class ConfiguredOllamaClient:
+    """
+    Reusable HTTP client for a configured Ollama server.
+
+    The client obtains its base URL, models, and timeout
+    from AppSettings.
+    """
+
+    def __init__(
+        self,
+        settings: AppSettings,
+        *,
+        http_client: httpx.Client | None = None,
+    ) -> None:
+        """Initialize the configured Ollama client."""
+
+        self._settings = settings
+        self._closed = False
+
+        if http_client is None:
+            self._http_client = httpx.Client(
+                base_url=settings.ollama_base_url,
+                timeout=httpx.Timeout(
+                    settings.ollama_timeout_seconds
+                ),
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+            )
+
+            self._owns_http_client = True
+        else:
+            self._http_client = http_client
+            self._owns_http_client = False
+
+    @property
+    def base_url(self) -> str:
+        """Return the configured Ollama base URL."""
+
+        return self._settings.ollama_base_url
+
+    @property
+    def generation_model(self) -> str:
+        """Return the configured generation model."""
+
+        return self._settings.generation_model
+
+    @property
+    def embedding_model(self) -> str:
+        """Return the configured embedding model."""
+
+        return self._settings.embedding_model
+
+    @property
+    def timeout_seconds(self) -> float:
+        """Return the configured request timeout."""
+
+        return self._settings.ollama_timeout_seconds
+
+    @property
+    def is_closed(self) -> bool:
+        """Report whether the component was closed."""
+
+        return self._closed
+
+    def health_check(self) -> list[str]:
+        """
+        Confirm that Ollama is reachable and list models.
+
+        The Ollama tags endpoint returns information about
+        models currently available to the local runtime.
+        """
+
+        self._require_open()
+
+        payload = self._get_json(
+            endpoint="/api/tags"
+        )
+
+        raw_models = payload.get(
+            "models"
+        )
+
+        if not isinstance(raw_models, list):
+            raise RuntimeError(
+                "Ollama returned an invalid models response."
+            )
+
+        model_names: list[str] = []
+
+        for raw_model in raw_models:
+            if not isinstance(raw_model, dict):
+                continue
+
+            name = raw_model.get(
+                "name"
+            )
+
+            if isinstance(name, str) and name.strip():
+                model_names.append(
+                    name.strip()
+                )
+
+        return model_names
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        temperature: float = 0.0,
+    ) -> GenerationResult:
+        """Generate one non-streaming text response."""
+
+        self._require_open()
+
+        cleaned_prompt = prompt.strip()
+
+        if not cleaned_prompt:
+            raise ValueError(
+                "The generation prompt cannot be empty."
+            )
+
+        if temperature < 0.0:
+            raise ValueError(
+                "Temperature cannot be negative."
+            )
+
+        request_payload: dict[str, Any] = {
+            "model": self.generation_model,
+            "prompt": cleaned_prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+            },
+        }
+
+        if system_prompt is not None:
+            cleaned_system_prompt = (
+                system_prompt.strip()
+            )
+
+            if not cleaned_system_prompt:
+                raise ValueError(
+                    "The system prompt cannot be blank."
+                )
+
+            request_payload["system"] = (
+                cleaned_system_prompt
+            )
+
+        payload = self._post_json(
+            endpoint="/api/generate",
+            request_payload=request_payload,
+        )
+
+        model = self._require_string(
+            payload=payload,
+            field_name="model",
+        )
+
+        response_text = self._require_string(
+            payload=payload,
+            field_name="response",
+        )
+
+        prompt_tokens = self._optional_integer(
+            payload=payload,
+            field_name="prompt_eval_count",
+        )
+
+        generated_tokens = self._optional_integer(
+            payload=payload,
+            field_name="eval_count",
+        )
+
+        total_duration = self._optional_integer(
+            payload=payload,
+            field_name="total_duration",
+        )
+
+        return GenerationResult(
+            model=model,
+            response=response_text,
+            prompt_tokens=prompt_tokens,
+            generated_tokens=generated_tokens,
+            total_duration_nanoseconds=(
+                total_duration
+            ),
+        )
+
+    def embed(
+        self,
+        inputs: str | Sequence[str],
+    ) -> EmbeddingResult:
+        """Generate embeddings for one or several texts."""
+
+        self._require_open()
+
+        normalized_inputs = self._normalize_inputs(
+            inputs
+        )
+
+        request_input: str | list[str]
+
+        if isinstance(inputs, str):
+            request_input = normalized_inputs[0]
+        else:
+            request_input = normalized_inputs
+
+        payload = self._post_json(
+            endpoint="/api/embed",
+            request_payload={
+                "model": self.embedding_model,
+                "input": request_input,
+            },
+        )
+
+        model = self._require_string(
+            payload=payload,
+            field_name="model",
+        )
+
+        embeddings = self._require_embeddings(
+            payload
+        )
+
+        if len(embeddings) != len(
+            normalized_inputs
+        ):
+            raise RuntimeError(
+                "Ollama returned a different number of "
+                "embeddings than requested."
+            )
+
+        self._validate_shared_dimension(
+            embeddings
+        )
+
+        input_tokens = self._optional_integer(
+            payload=payload,
+            field_name="prompt_eval_count",
+        )
+
+        total_duration = self._optional_integer(
+            payload=payload,
+            field_name="total_duration",
+        )
+
+        return EmbeddingResult(
+            model=model,
+            embeddings=embeddings,
+            input_tokens=input_tokens,
+            total_duration_nanoseconds=(
+                total_duration
+            ),
+        )
+
+    def close(self) -> None:
+        """Close the owned HTTPX client safely."""
+
+        if self._closed:
+            return
+
+        if self._owns_http_client:
+            self._http_client.close()
+
+        self._closed = True
+
+    def __enter__(
+        self,
+    ) -> ConfiguredOllamaClient:
+        """Enter a context-manager block."""
+
+        self._require_open()
+
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the component after leaving the block."""
+
+        del exception_type
+        del exception_value
+        del traceback
+
+        self.close()
+
+    def _get_json(
+        self,
+        *,
+        endpoint: str,
+    ) -> dict[str, Any]:
+        """Send a GET request and return a JSON object."""
+
+        try:
+            response = self._http_client.get(
+                endpoint
+            )
+
+            response.raise_for_status()
+        except httpx.TimeoutException as error:
+            raise RuntimeError(
+                "The Ollama request timed out."
+            ) from error
+        except httpx.RequestError as error:
+            raise RuntimeError(
+                "Could not connect to the configured "
+                f"Ollama server at {self.base_url}."
+            ) from error
+        except httpx.HTTPStatusError as error:
+            raise RuntimeError(
+                "Ollama returned HTTP status "
+                f"{error.response.status_code}."
+            ) from error
+
+        return self._decode_json_object(
+            response
+        )
+
+    def _post_json(
+        self,
+        *,
+        endpoint: str,
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Send a JSON POST request and decode its response."""
+
+        try:
+            response = self._http_client.post(
+                endpoint,
+                json=request_payload,
+            )
+
+            response.raise_for_status()
+        except httpx.TimeoutException as error:
+            raise RuntimeError(
+                "The Ollama request timed out."
+            ) from error
+        except httpx.RequestError as error:
+            raise RuntimeError(
+                "Could not connect to the configured "
+                f"Ollama server at {self.base_url}."
+            ) from error
+        except httpx.HTTPStatusError as error:
+            raise RuntimeError(
+                "Ollama returned HTTP status "
+                f"{error.response.status_code}."
+            ) from error
+
+        return self._decode_json_object(
+            response
+        )
+
+    @staticmethod
+    def _decode_json_object(
+        response: httpx.Response,
+    ) -> dict[str, Any]:
+        """Decode and validate a JSON object response."""
+
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise RuntimeError(
+                "Ollama returned invalid JSON."
+            ) from error
+
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                "Ollama returned JSON that was not "
+                "an object."
+            )
+
+        return payload
+
+    @staticmethod
+    def _normalize_inputs(
+        inputs: str | Sequence[str],
+    ) -> list[str]:
+        """Validate and normalize embedding inputs."""
+
+        if isinstance(inputs, str):
+            candidates = [
+                inputs
+            ]
+        else:
+            candidates = list(
+                inputs
+            )
+
+        if not candidates:
+            raise ValueError(
+                "At least one embedding input is required."
+            )
+
+        normalized: list[str] = []
+
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                raise TypeError(
+                    "Every embedding input must be a string."
+                )
+
+            cleaned_candidate = candidate.strip()
+
+            if not cleaned_candidate:
+                raise ValueError(
+                    "Embedding inputs cannot be blank."
+                )
+
+            normalized.append(
+                cleaned_candidate
+            )
+
+        return normalized
+
+    @staticmethod
+    def _require_string(
+        *,
+        payload: dict[str, Any],
+        field_name: str,
+    ) -> str:
+        """Read and validate a required string field."""
+
+        value = payload.get(
+            field_name
+        )
+
+        if not isinstance(value, str):
+            raise RuntimeError(
+                "Ollama returned an invalid "
+                f"{field_name!r} field."
+            )
+
+        cleaned_value = value.strip()
+
+        if not cleaned_value:
+            raise RuntimeError(
+                "Ollama returned an empty "
+                f"{field_name!r} field."
+            )
+
+        return cleaned_value
+
+    @staticmethod
+    def _optional_integer(
+        *,
+        payload: dict[str, Any],
+        field_name: str,
+    ) -> int | None:
+        """Read an optional non-negative integer field."""
+
+        value = payload.get(
+            field_name
+        )
+
+        if value is None:
+            return None
+
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+        ):
+            raise RuntimeError(
+                "Ollama returned an invalid "
+                f"{field_name!r} field."
+            )
+
+        return value
+
+    @staticmethod
+    def _require_embeddings(
+        payload: dict[str, Any],
+    ) -> list[list[float]]:
+        """Read and validate Ollama embedding vectors."""
+
+        raw_embeddings = payload.get(
+            "embeddings"
+        )
+
+        if not isinstance(raw_embeddings, list):
+            raise RuntimeError(
+                "Ollama returned an invalid embeddings field."
+            )
+
+        embeddings: list[list[float]] = []
+
+        for raw_vector in raw_embeddings:
+            if (
+                not isinstance(raw_vector, list)
+                or not raw_vector
+            ):
+                raise RuntimeError(
+                    "Ollama returned an invalid "
+                    "embedding vector."
+                )
+
+            vector: list[float] = []
+
+            for raw_value in raw_vector:
+                if (
+                    isinstance(raw_value, bool)
+                    or not isinstance(
+                        raw_value,
+                        int | float,
+                    )
+                ):
+                    raise RuntimeError(
+                        "An embedding contains a "
+                        "non-numeric value."
+                    )
+
+                vector.append(
+                    float(raw_value)
+                )
+
+            embeddings.append(
+                vector
+            )
+
+        if not embeddings:
+            raise RuntimeError(
+                "Ollama returned no embeddings."
+            )
+
+        return embeddings
+
+    @staticmethod
+    def _validate_shared_dimension(
+        embeddings: list[list[float]],
+    ) -> None:
+        """Ensure every returned vector has equal length."""
+
+        expected_dimension = len(
+            embeddings[0]
+        )
+
+        if expected_dimension <= 0:
+            raise RuntimeError(
+                "The embedding dimension must be positive."
+            )
+
+        for vector in embeddings:
+            if len(vector) != expected_dimension:
+                raise RuntimeError(
+                    "Ollama returned embeddings with "
+                    "inconsistent dimensions."
+                )
+
+    def _require_open(self) -> None:
+        """Reject work after the component has closed."""
+
+        if self._closed:
+            raise RuntimeError(
+                "The configured Ollama client is closed."
+            )
+
+
+def print_models(
+    model_names: list[str],
+) -> None:
+    """Print locally available Ollama models."""
+
+    print("AVAILABLE OLLAMA MODELS")
+    print("-----------------------")
+
+    if not model_names:
+        print(
+            "No local Ollama models were reported."
+        )
+        print()
+        return
+
+    for model_name in model_names:
+        print(
+            "-",
+            model_name,
+        )
+
+    print()
+
+
+def main() -> None:
+    """Demonstrate the settings-driven Ollama client."""
+
+    settings = get_settings()
+
+    print("CONFIGURED OLLAMA CLIENT")
+    print("========================")
+    print()
+    print(
+        "Base URL:",
+        settings.ollama_base_url,
+    )
+    print(
+        "Generation model:",
+        settings.generation_model,
+    )
+    print(
+        "Embedding model:",
+        settings.embedding_model,
+    )
+    print(
+        "Timeout seconds:",
+        settings.ollama_timeout_seconds,
+    )
+    print()
+
+    with ConfiguredOllamaClient(
+        settings
+    ) as client:
+        print(
+            "1. Checking the Ollama server..."
+        )
+
+        model_names = client.health_check()
+
+        print(
+            "   Ollama server responded."
+        )
+        print()
+
+        print_models(
+            model_names
+        )
+
+        required_models = {
+            client.generation_model,
+            client.embedding_model,
+        }
+
+        missing_models = sorted(
+            model_name
+            for model_name in required_models
+            if model_name not in model_names
+            and f"{model_name}:latest"
+            not in model_names
+        )
+
+        if missing_models:
+            raise RuntimeError(
+                "Required Ollama models are missing: "
+                + ", ".join(missing_models)
+            )
+
+        print(
+            "2. Generating a configured response..."
+        )
+
+        generation_result = client.generate(
+            (
+                "Use only these supplied facts: Qdrant is a "
+                "vector database; RAG means retrieval-augmented "
+                "generation; Qdrant stores embeddings and "
+                "retrieves semantically similar document chunks. "
+                "Explain Qdrant's role in a RAG system in exactly "
+                "one concise sentence."
+            ),
+            system_prompt=(
+                "You are a precise AI engineering tutor. "
+                "Preserve technical product names exactly and "
+                "do not replace supplied definitions."
+            ),
+            temperature=0.0,
+        )
+
+        print(
+            "   Generation completed."
+        )
+        print()
+
+        print("GENERATION RESULT")
+        print("-----------------")
+        print(
+            "Model:",
+            generation_result.model,
+        )
+        print(
+            "Prompt tokens:",
+            generation_result.prompt_tokens,
+        )
+        print(
+            "Generated tokens:",
+            generation_result.generated_tokens,
+        )
+        print(
+            "Response:"
+        )
+        print(
+            generation_result.response
+        )
+        print()
+
+        print(
+            "3. Generating configured embeddings..."
+        )
+
+        embedding_result = client.embed(
+            [
+                (
+                    "Qdrant stores and searches document "
+                    "embeddings."
+                ),
+                (
+                    "Guarded RAG abstains when retrieval "
+                    "confidence is too low."
+                ),
+            ]
+        )
+
+        print(
+            "   Embeddings generated."
+        )
+        print()
+
+        print("EMBEDDING RESULT")
+        print("----------------")
+        print(
+            "Model:",
+            embedding_result.model,
+        )
+        print(
+            "Embedding count:",
+            embedding_result.embedding_count,
+        )
+        print(
+            "Embedding dimension:",
+            embedding_result.embedding_dimension,
+        )
+        print(
+            "Input tokens:",
+            embedding_result.input_tokens,
+        )
+        print()
+
+        print(
+            "Client closed inside context:",
+            client.is_closed,
+        )
+
+    print(
+        "Client closed after context:",
+        client.is_closed,
+    )
+    print()
+
+    print("STATUS")
+    print("------")
+    print(
+        "Ollama generation and embedding configuration "
+        "now comes from AppSettings."
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+Lesson 47 — Application Runtime
+-------------------------------
+FILE: C:\Users\mazya\Projects\generative-ai-learning\lessons\lesson_47_application_runtime.py
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from types import TracebackType
+
+from lessons.lesson_36_guarded_rag_service import (
+    GuardedRAGService,
+)
+from lessons.lesson_42_application_settings import (
+    AppSettings,
+    get_settings,
+)
+from lessons.lesson_45_configured_ollama_client import (
+    ConfiguredOllamaClient,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeValidationReport:
+    """Validated status of the application dependencies."""
+
+    stored_point_count: int
+    source_chunk_count: int
+    collection_name: str
+    retrieval_top_k: int
+    available_models: tuple[str, ...]
+    generation_model_available: bool
+    embedding_model_available: bool
+
+    @property
+    def all_required_models_available(self) -> bool:
+        """Report whether both configured models are available."""
+
+        return (
+            self.generation_model_available
+            and self.embedding_model_available
+        )
+
+
+class ApplicationRuntime:
+    """
+    Own the long-lived dependencies of the RAG application.
+
+    The runtime combines:
+
+    1. Validated application settings.
+    2. The Qdrant-backed guarded-RAG service.
+    3. The configured Ollama HTTP client.
+    """
+
+    def __init__(
+        self,
+        *,
+        settings: AppSettings,
+        rag_service: GuardedRAGService,
+        ollama_client: ConfiguredOllamaClient,
+        owns_rag_service: bool = True,
+        owns_ollama_client: bool = True,
+    ) -> None:
+        """Initialize a runtime from existing dependencies."""
+
+        self._settings = settings
+        self._rag_service = rag_service
+        self._ollama_client = ollama_client
+
+        self._owns_rag_service = owns_rag_service
+        self._owns_ollama_client = owns_ollama_client
+
+        self._closed = False
+        self._validation_report: (
+            RuntimeValidationReport | None
+        ) = None
+
+    @classmethod
+    def from_settings(
+        cls,
+        settings: AppSettings,
+    ) -> ApplicationRuntime:
+        """
+        Build the complete runtime from validated settings.
+
+        If Ollama-client construction fails after the RAG
+        service has been created, the RAG service is closed
+        before the error is re-raised.
+        """
+
+        rag_service = (
+            GuardedRAGService.from_local_qdrant(
+                index_path=settings.vector_index_path,
+                qdrant_path=settings.qdrant_path,
+                collection_name=(
+                    settings.qdrant_collection
+                ),
+                top_k=settings.retrieval_top_k,
+            )
+        )
+
+        try:
+            ollama_client = ConfiguredOllamaClient(
+                settings
+            )
+        except Exception:
+            rag_service.close()
+            raise
+
+        return cls(
+            settings=settings,
+            rag_service=rag_service,
+            ollama_client=ollama_client,
+            owns_rag_service=True,
+            owns_ollama_client=True,
+        )
+
+    @property
+    def settings(self) -> AppSettings:
+        """Return the validated runtime settings."""
+
+        return self._settings
+
+    @property
+    def rag_service(self) -> GuardedRAGService:
+        """Return the managed guarded-RAG service."""
+
+        self._require_open()
+
+        return self._rag_service
+
+    @property
+    def ollama_client(self) -> ConfiguredOllamaClient:
+        """Return the managed Ollama client."""
+
+        self._require_open()
+
+        return self._ollama_client
+
+    @property
+    def is_closed(self) -> bool:
+        """Report whether the runtime has been closed."""
+
+        return self._closed
+
+    @property
+    def validation_report(
+        self,
+    ) -> RuntimeValidationReport | None:
+        """Return the most recent validation report."""
+
+        return self._validation_report
+
+    def validate(self) -> RuntimeValidationReport:
+        """
+        Validate Qdrant and the configured Ollama models.
+
+        Validation confirms that:
+
+        1. The Qdrant collection matches the source index.
+        2. Ollama is reachable.
+        3. The generation model is installed.
+        4. The embedding model is installed.
+        """
+
+        self._require_open()
+
+        stored_point_count = (
+            self._rag_service.validate()
+        )
+
+        available_models = tuple(
+            self._ollama_client.health_check()
+        )
+
+        generation_model_available = (
+            model_is_available(
+                configured_model=(
+                    self._settings.generation_model
+                ),
+                available_models=available_models,
+            )
+        )
+
+        embedding_model_available = (
+            model_is_available(
+                configured_model=(
+                    self._settings.embedding_model
+                ),
+                available_models=available_models,
+            )
+        )
+
+        report = RuntimeValidationReport(
+            stored_point_count=stored_point_count,
+            source_chunk_count=(
+                self._rag_service.source_chunk_count
+            ),
+            collection_name=(
+                self._rag_service.collection_name
+            ),
+            retrieval_top_k=(
+                self._rag_service.top_k
+            ),
+            available_models=available_models,
+            generation_model_available=(
+                generation_model_available
+            ),
+            embedding_model_available=(
+                embedding_model_available
+            ),
+        )
+
+        if not report.all_required_models_available:
+            missing_models: list[str] = []
+
+            if not generation_model_available:
+                missing_models.append(
+                    self._settings.generation_model
+                )
+
+            if not embedding_model_available:
+                missing_models.append(
+                    self._settings.embedding_model
+                )
+
+            raise RuntimeError(
+                "Required Ollama models are unavailable: "
+                + ", ".join(missing_models)
+            )
+
+        self._validation_report = report
+
+        return report
+
+    def close(self) -> None:
+        """Close all runtime-owned dependencies safely."""
+
+        if self._closed:
+            return
+
+        close_error: Exception | None = None
+
+        if self._owns_rag_service:
+            try:
+                self._rag_service.close()
+            except Exception as error:
+                close_error = error
+
+        if self._owns_ollama_client:
+            try:
+                self._ollama_client.close()
+            except Exception as error:
+                if close_error is None:
+                    close_error = error
+
+        self._closed = True
+
+        if close_error is not None:
+            raise RuntimeError(
+                "A runtime dependency could not be "
+                "closed cleanly."
+            ) from close_error
+
+    def __enter__(
+        self,
+    ) -> ApplicationRuntime:
+        """Enter a managed runtime context."""
+
+        self._require_open()
+
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close runtime dependencies when leaving context."""
+
+        del exception_type
+        del exception_value
+        del traceback
+
+        self.close()
+
+    def _require_open(self) -> None:
+        """Reject runtime operations after closure."""
+
+        if self._closed:
+            raise RuntimeError(
+                "The application runtime is closed."
+            )
+
+
+def model_is_available(
+    *,
+    configured_model: str,
+    available_models: tuple[str, ...],
+) -> bool:
+    """
+    Match configured Ollama model names safely.
+
+    Ollama may report an untagged configured model using
+    the explicit ':latest' tag.
+    """
+
+    normalized_configured = (
+        configured_model.strip()
+    )
+
+    normalized_available = {
+        model_name.strip()
+        for model_name in available_models
+        if model_name.strip()
+    }
+
+    if normalized_configured in normalized_available:
+        return True
+
+    if ":" not in normalized_configured:
+        return (
+            f"{normalized_configured}:latest"
+            in normalized_available
+        )
+
+    if normalized_configured.endswith(
+        ":latest"
+    ):
+        untagged_name = (
+            normalized_configured[
+                : -len(":latest")
+            ]
+        )
+
+        return untagged_name in normalized_available
+
+    return False
+
+
+def print_model_status(
+    *,
+    model_name: str,
+    available: bool,
+) -> None:
+    """Print one configured model status."""
+
+    status_text = (
+        "available"
+        if available
+        else "missing"
+    )
+
+    print(
+        f"- {model_name}: {status_text}"
+    )
+
+
+def main() -> None:
+    """Build and validate the application runtime."""
+
+    settings = get_settings()
+
+    print("APPLICATION RUNTIME")
+    print("===================")
+    print()
+    print(
+        "Creating configured runtime dependencies..."
+    )
+    print()
+
+    with ApplicationRuntime.from_settings(
+        settings
+    ) as runtime:
+        report = runtime.validate()
+
+        print("QDRANT STATUS")
+        print("-------------")
+        print(
+            "Collection:",
+            report.collection_name,
+        )
+        print(
+            "Source chunks:",
+            report.source_chunk_count,
+        )
+        print(
+            "Stored points:",
+            report.stored_point_count,
+        )
+        print(
+            "Retrieval top K:",
+            report.retrieval_top_k,
+        )
+        print()
+
+        print("OLLAMA STATUS")
+        print("-------------")
+
+        for model_name in report.available_models:
+            print(
+                "-",
+                model_name,
+            )
+
+        print()
+        print("REQUIRED MODELS")
+        print("---------------")
+
+        print_model_status(
+            model_name=settings.generation_model,
+            available=(
+                report.generation_model_available
+            ),
+        )
+
+        print_model_status(
+            model_name=settings.embedding_model,
+            available=(
+                report.embedding_model_available
+            ),
+        )
+
+        print()
+        print("LIFECYCLE STATUS")
+        print("----------------")
+        print(
+            "Runtime closed inside context:",
+            runtime.is_closed,
+        )
+        print(
+            "RAG service closed inside context:",
+            runtime.rag_service.is_closed,
+        )
+        print(
+            "Ollama client closed inside context:",
+            runtime.ollama_client.is_closed,
+        )
+
+    print(
+        "Runtime closed after context:",
+        runtime.is_closed,
+    )
+    print()
+
+    print("STATUS")
+    print("------")
+    print(
+        "Qdrant and Ollama dependencies were created, "
+        "validated, and closed through one runtime."
+    )
+
+
+if __name__ == "__main__":
+    main()
