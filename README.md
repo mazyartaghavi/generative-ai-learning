@@ -1,5 +1,8 @@
 # Generative AI and LLM Engineering Learning Lab
 
+
+[![Continuous Integration](https://github.com/mazyartaghavi/generative-ai-learning/actions/workflows/ci.yml/badge.svg)](https://github.com/mazyartaghavi/generative-ai-learning/actions/workflows/ci.yml)
+
 A practical, incremental learning repository covering local large language models, structured generation, embeddings, retrieval-augmented generation, vector databases, FastAPI services, automated testing, observability, Docker, and continuous integration.
 
 ## Project status
